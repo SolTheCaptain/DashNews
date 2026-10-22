@@ -11,8 +11,10 @@
 """
 import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
+from html import unescape
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
@@ -158,14 +160,14 @@ def fd_next(card, tz):
     if first_only:
         first_date = parse_utc(ms[0]["utcDate"]).astimezone(tz).date()
         ms = [m for m in ms if parse_utc(m["utcDate"]).astimezone(tz).date() == first_date]
-    lines = ["(первая команда — хозяева, вторая — гости)"]
+    lines = []
     cur = ""
     for m in ms:
         loc = parse_utc(m["utcDate"]).astimezone(tz)
         dl = day_label(loc)
         if dl != cur:
             cur = dl
-            lines += ["", dl.upper()]
+            lines += ([""] if lines else []) + [dl.upper()]
         h, a = m["homeTeam"], m["awayTeam"]
         lines.append(f"  {loc:%H:%M}  {h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}")
     lines += ["", f"время по {tz.key}"]
@@ -265,6 +267,47 @@ def slam_russians(card, tz):
     return lines + [""] + [r[1] for r in rows] + ["", f"время по {tz.key}"]
  
  
+# ---------- источник: Steam (магазин, ключ не нужен) ----------
+ 
+def steam_upcoming(card, tz):
+    """Топ-N самых ожидаемых игр до конца года по списку «Популярные ожидаемые» Steam
+    (его порядок строится по вишлистам, предзаказам и успеху прошлых игр студии)."""
+    n = int(card.get("count", 5))
+    today = datetime.now(tz).date()
+    end = date(today.year, 12, 31)
+    games, seen = [], set()
+    for start in range(0, int(card.get("scan", 150)), 50):
+        j = http_json("https://store.steampowered.com/search/results/?query&count=50"
+                      f"&start={start}&filter=popularcomingsoon&category1=998&cc=us&l=english&infinite=1")
+        page = j.get("results_html") or ""
+        if not page:
+            break
+        for appid, row in re.findall(r'<a [^>]*data-ds-appid="([\d,]+)"[^>]*>(.*?)</a>', page, re.S):
+            t = re.search(r'class="title">(.*?)</span>', row, re.S)
+            r = re.search(r'search_released[^>]*>\s*(.*?)\s*</div>', row, re.S)
+            if not t or not r or appid in seen:
+                continue
+            seen.add(appid)
+            d = None
+            for fmt in ("%b %d, %Y", "%d %b, %Y"):
+                try:
+                    d = datetime.strptime(r.group(1).strip(), fmt).date()
+                    break
+                except ValueError:
+                    pass
+            if d and today <= d <= end:
+                games.append((unescape(t.group(1).strip()), d))
+        if len(games) >= n:
+            break
+    if not games:
+        return ["В списке «Популярные ожидаемые» нет игр с точной датой до конца года."]
+    lines = [f"Топ-{n} ожидаемых PC-новинок до {end.day} {MONTHS[end.month - 1]}", ""]
+    for i, (name, d) in enumerate(games[:n], 1):
+        lines.append(f"{i}. {name} — {d.day} {MONTHS[d.month - 1]}")
+    lines += ["", "данные: Steam, «Популярные ожидаемые»"]
+    return lines
+ 
+ 
 # ---------- источник: Open-Meteo (погода, ключ не нужен) ----------
  
 WMO = {
@@ -308,6 +351,7 @@ HANDLERS = {
     "fd_next": fd_next,
     "weather": weather,
     "slam_russians": slam_russians,
+    "steam_upcoming": steam_upcoming,
 }
  
  
