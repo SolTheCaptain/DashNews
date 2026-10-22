@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дашборд</title>
+</head>
+<body>
+<h1>Дашборд</h1>
+<p><button id="reload">Перечитать данные</button> <span id="stamp"></span></p>
+<div id="cards"></div>
+
+<script>
+// Страница ничего не запрашивает у сторонних сайтов: просто показывает data.json,
+// который собирает collect.py по расписанию. Блоки и их порядок задаются в config.json.
+
+const root = document.getElementById("cards");
+const stamp = document.getElementById("stamp");
+
+function fmt(iso, tz) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("ru-RU", {
+    timeZone: tz, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function render(data) {
+  const tz = data.timezone || "Europe/Moscow";
+  root.innerHTML = "";
+  for (const c of data.cards) {
+    const sec = document.createElement("section");
+    const h = document.createElement("h2");
+    h.textContent = c.title;
+    const pre = document.createElement("pre");
+    pre.textContent = c.lines && c.lines.length ? c.lines.join("\n") : "Нет данных.";
+    const small = document.createElement("small");
+    small.textContent = c.ok
+      ? "обновлено " + fmt(c.fetched, tz)
+      : "⚠ не удалось обновить (" + c.error + "). " + (c.fetched ? "Показаны данные от " + fmt(c.fetched, tz) + "." : "");
+    sec.append(h, pre, small, document.createElement("hr"));
+    root.appendChild(sec);
+  }
+  stamp.textContent = "данные собраны " + fmt(data.updated, tz);
+}
+
+async function load() {
+  stamp.textContent = "загрузка…";
+  try {
+    const r = await fetch("data.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+  } catch (e) {
+    root.textContent = "Не удалось загрузить data.json: " + e.message +
+      " (страницу нужно открывать по ссылке GitHub Pages, а не файлом с диска)";
+    stamp.textContent = "";
+  }
+}
+
+document.getElementById("reload").onclick = load;
+load();
+</script>
+</body>
+</html>

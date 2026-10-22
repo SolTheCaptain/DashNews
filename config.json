@@ -1,0 +1,33 @@
+{
+  "timezone": "Europe/Moscow",
+  "cards": [
+    {
+      "id": "spartak",
+      "title": "Спартак — ближайший матч",
+      "type": "team_next",
+      "team": "Spartak Moscow",
+      "country": "Russia"
+    },
+    {
+      "id": "real",
+      "title": "Реал — ближайший матч",
+      "type": "team_next",
+      "team": "Real Madrid",
+      "country": "Spain"
+    },
+    {
+      "id": "ucl-table",
+      "title": "Лига чемпионов — турнирная таблица",
+      "type": "fd_table",
+      "comp": "CL",
+      "cutoffs": [[8, "1–8: сразу в 1/8 финала"], [24, "9–24: плей-офф; ниже: вылет"]]
+    },
+    {
+      "id": "ucl-next",
+      "title": "Лига чемпионов — ближайшие матчи",
+      "type": "fd_next",
+      "comp": "CL",
+      "days": 9
+    }
+  ]
+}
