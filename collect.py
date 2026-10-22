@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Собирает данные для дашборда в data.json.
-
+ 
 Читает config.json, для каждого блока вызывает обработчик по полю "type"
 и пишет результат в data.json. Только стандартная библиотека Python.
-
+ 
 Как добавить новый тип блока:
   1. написать функцию вида  def мой_блок(card, tz): ... return [строки]
   2. добавить её в словарь HANDLERS внизу файла
@@ -11,39 +11,40 @@
 """
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
-
+ 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 TSDB = "https://www.thesportsdb.com/api/v1/json/" + os.environ.get("THESPORTSDB_KEY", "123")
 FD = "https://api.football-data.org/v4"
 WD = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
 MONTHS = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля",
           "августа", "сентября", "октября", "ноября", "декабря"]
-
-
+ 
+ 
 # ---------- общие помощники ----------
-
+ 
 def http_json(url, headers=None):
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 (dashboard-collector)", **(headers or {})})
     with urlopen(req, timeout=30) as r:
         text = r.read().decode("utf-8")
     return json.loads(text) if text.strip() else {}
-
-
+ 
+ 
 def parse_utc(s):
     dt = datetime.fromisoformat(s.replace("Z", ""))
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
-
-
+ 
+ 
 def day_label(dt):
     return f"{WD[dt.weekday()]}, {dt.day} {MONTHS[dt.month - 1]}"
-
-
+ 
+ 
 def table_lines(rows, cutoffs):
     """rows: список (позиция, команда, И, В, Н, П, разница, очки)"""
     lines = ["#   Команда                    И  В  Н  П  РМ   О"]
@@ -54,10 +55,10 @@ def table_lines(rows, cutoffs):
             if pos == cpos:
                 lines.append(f"--- {text} ---")
     return lines
-
-
+ 
+ 
 # ---------- источник: TheSportsDB (ближайший матч команды) ----------
-
+ 
 def team_next(card, tz):
     name, country = card["team"], card.get("country")
     found = http_json(f"{TSDB}/searchteams.php?t={quote(name)}")
@@ -69,14 +70,14 @@ def team_next(card, tz):
     events = http_json(f"{TSDB}/eventsnext.php?id={team['idTeam']}").get("events") or []
     if not events:
         return ["Ближайших матчей в источнике нет."]
-
+ 
     def when(e):
         if e.get("strTimestamp"):
             return parse_utc(e["strTimestamp"])
         if e.get("dateEvent"):
             return parse_utc(e["dateEvent"] + "T" + (e.get("strTime") or "00:00:00"))
         return None
-
+ 
     events = sorted(events, key=lambda e: when(e) or datetime.max.replace(tzinfo=timezone.utc))
     ev = events[0]
     w = when(ev)
@@ -88,8 +89,8 @@ def team_next(card, tz):
     if ev.get("strVenue"):
         lines.append("Стадион: " + ev["strVenue"])
     return lines
-
-
+ 
+ 
 def teams_next(card, tz):
     """Несколько команд подряд: ближайший матч каждой."""
     lines, fails = [], 0
@@ -107,17 +108,17 @@ def teams_next(card, tz):
     if fails == len(card["teams"]):
         raise RuntimeError("не удалось получить данные ни по одной команде")
     return lines
-
-
+ 
+ 
 # ---------- источник: football-data.org (турниры) ----------
-
+ 
 def fd_get(path):
     key = os.environ.get("FOOTBALL_DATA_KEY")
     if not key:
         raise RuntimeError("нет ключа: добавь секрет FOOTBALL_DATA_KEY в настройках репозитория")
     return http_json(FD + path, {"X-Auth-Token": key})
-
-
+ 
+ 
 def fd_table(card, tz):
     j = fd_get(f"/competitions/{card['comp']}/standings")
     sts = j.get("standings") or []
@@ -132,8 +133,8 @@ def fd_table(card, tz):
     if md:
         lines.append(f"Тур {md}")
     return lines + table_lines(data, [tuple(c) for c in card.get("cutoffs", [])])
-
-
+ 
+ 
 def fd_next(card, tz):
     days = min(int(card.get("days", 9)), 60)
     first_only = bool(card.get("first_day_only"))  # показать только ближайший игровой день
@@ -169,10 +170,103 @@ def fd_next(card, tz):
         lines.append(f"  {loc:%H:%M}  {h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}")
     lines += ["", f"время по {tz.key}"]
     return lines
-
-
+ 
+ 
+# ---------- источник: ESPN (теннис, неофициальный открытый API, ключ не нужен) ----------
+ 
+ESPN = "https://site.api.espn.com/apis/site/v2/sports/tennis"
+ 
+ 
+def slam_russians(card, tz):
+    """Ближайший шлем: невылетевшие игроки из топ-N рейтинга, родившиеся в нужной стране, и их ближайший матч."""
+    today = datetime.now(tz).date()
+    slam = next((s for s in card["slams"] if date.fromisoformat(s["end"]) >= today), None)
+    if not slam:
+        return ["Ближайший турнир не задан: добавь его в slams в config.json."]
+    start, end = date.fromisoformat(slam["start"]), date.fromisoformat(slam["end"])
+    lines = [f"{slam['name']}: {start.day} {MONTHS[start.month - 1]} — {end.day} {MONTHS[end.month - 1]} (основная сетка)"]
+    if today < start - timedelta(days=4):
+        lines.append(f"До старта {(start - today).days} дн., сетки пока нет.")
+        return lines
+    top = int(card.get("top", 100))
+    born = [b.lower() for b in card.get("born_in", ["russia"])]
+ 
+    # матчи одиночного разряда с первого дня до ближайших двух дней расписания
+    last = min(end, max(today, start) + timedelta(days=2))
+    games = []  # (время UTC, [(id, имя, победитель)], завершён, раунд)
+    d = start
+    while d <= last:
+        for tour in ("atp", "wta"):
+            j = http_json(f"{ESPN}/{tour}/scoreboard?dates={d:%Y%m%d}")
+            for ev in j.get("events") or []:
+                if slam["name"].lower() not in (ev.get("name") or "").lower():
+                    continue
+                for g in ev.get("groupings") or []:
+                    if "singles" not in ((g.get("grouping") or {}).get("displayName") or "").lower():
+                        continue
+                    for c in g.get("competitions") or []:
+                        pl = []
+                        for x in c.get("competitors") or []:
+                            a = x.get("athlete") or {}
+                            pl.append((str(a.get("id") or x.get("id") or ""), a.get("displayName") or "?", x.get("winner")))
+                        done = ((c.get("status") or {}).get("type") or {}).get("state") == "post"
+                        games.append((parse_utc(c["date"]), pl, done, (c.get("round") or {}).get("displayName")))
+        d += timedelta(days=1)
+    games.sort(key=lambda g: g[0])
+    if not games:
+        lines.append("Сетки или расписания в источнике пока нет.")
+        return lines
+ 
+    # рейтинг: id игроков из топ-N
+    ranks = {}
+    for tour in ("atp", "wta"):
+        rk = (http_json(f"{ESPN}/{tour}/rankings").get("rankings") or [{}])[0].get("ranks") or []
+        for r in rk:
+            if int(r.get("current") or 9999) <= top:
+                ranks[str((r.get("athlete") or {}).get("id"))] = int(r["current"])
+    if not ranks:
+        raise RuntimeError("рейтинг в источнике не получен")
+ 
+    # невылетевшие игроки из топ-N
+    lost = {i for g in games for i, _, w in g[1] if g[2] and w is False}
+    cand = {i: n for g in games for i, n, _ in g[1] if i in ranks and i not in lost}
+ 
+    # место рождения
+    def is_born(i):
+        try:
+            a = http_json(f"https://sports.core.api.espn.com/v2/sports/tennis/athletes/{i}")
+            return any(b in json.dumps(a.get("birthPlace") or {}).lower() for b in born)
+        except Exception as e:
+            print(f"::warning::игрок {i}: {e}")
+            return None
+    with ThreadPoolExecutor(8) as ex:
+        res = dict(zip(cand, ex.map(is_born, cand)))
+    if cand and all(v is None for v in res.values()):
+        raise RuntimeError("не удалось получить место рождения игроков")
+ 
+    far = datetime.max.replace(tzinfo=timezone.utc)
+    rows = []
+    for i, ok in res.items():
+        if not ok:
+            continue
+        nxt = next((g for g in games if not g[2] and any(x[0] == i for x in g[1])), None)
+        head = f"{cand[i]} (#{ranks[i]}) — "
+        if nxt:
+            loc = nxt[0].astimezone(tz)
+            opp = next((n for j, n, _ in nxt[1] if j != i), "соперник уточняется")
+            rnd = f", {nxt[3]}" if nxt[3] else ""
+            rows.append((nxt[0], head + f"{opp}, {day_label(loc)}, {loc:%H:%M}{rnd}"))
+        else:
+            rows.append((far, head + "ждёт следующего матча"))
+    if not rows:
+        lines.append(f"Невылетевших игроков из топ-{top}, родившихся в нужной стране, нет.")
+        return lines
+    rows.sort(key=lambda r: r[0])
+    return lines + [""] + [r[1] for r in rows] + ["", f"время по {tz.key}"]
+ 
+ 
 # ---------- источник: Open-Meteo (погода, ключ не нужен) ----------
-
+ 
 WMO = {
     0: "ясно", 1: "в основном ясно", 2: "переменная облачность", 3: "пасмурно",
     45: "туман", 48: "изморозь", 51: "морось", 53: "морось", 55: "сильная морось",
@@ -182,13 +276,13 @@ WMO = {
     82: "сильный ливень", 85: "снегопад", 86: "сильный снегопад", 95: "гроза",
     96: "гроза с градом", 99: "гроза с градом",
 }
-
-
+ 
+ 
 def signed(x):
     n = round(x)
     return f"{'+' if n > 0 else ''}{n}"
-
-
+ 
+ 
 def weather(card, tz):
     url = (f"https://api.open-meteo.com/v1/forecast?latitude={card['lat']}&longitude={card['lon']}"
            "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m"
@@ -203,21 +297,22 @@ def weather(card, tz):
         lines.append(f"{names[i]}: {signed(d['temperature_2m_min'][i])}…{signed(d['temperature_2m_max'][i])}°, "
                      f"{WMO.get(d['weather_code'][i], '—')}, {d['precipitation_probability_max'][i]}%")
     return lines
-
-
+ 
+ 
 # ---------- реестр типов блоков ----------
-
+ 
 HANDLERS = {
     "team_next": team_next,
     "teams_next": teams_next,
     "fd_table": fd_table,
     "fd_next": fd_next,
     "weather": weather,
+    "slam_russians": slam_russians,
 }
-
-
+ 
+ 
 # ---------- запуск ----------
-
+ 
 def load_previous():
     """Прошлые данные нужны, чтобы при сбое источника показать последнее удачное."""
     prev = {}
@@ -233,8 +328,8 @@ def load_previous():
     except Exception:
         pass
     return prev
-
-
+ 
+ 
 def run_section(sec, tz, prev):
     """Один блок: возвращает словарь для data.json. Ошибка не роняет остальные."""
     out = {"id": sec["id"], "title": sec["title"]}
@@ -248,8 +343,8 @@ def run_section(sec, tz, prev):
         print(f"::warning::{sec['id']}: {e}")
         out.update(ok=False, error=str(e), lines=(prev or {}).get("lines") or [])
     return out
-
-
+ 
+ 
 def run_group(card, tz, prev_card, now_iso):
     """Карточка с подблоками и одной общей пометкой «обновлено»."""
     prev_secs = {s["id"]: s for s in (prev_card or {}).get("sections", [])}
@@ -258,8 +353,8 @@ def run_group(card, tz, prev_card, now_iso):
     any_ok = any(s["ok"] for s in secs)
     return {"id": card["id"], "title": card["title"], "ok": all(s["ok"] for s in secs),
             "fetched": now_iso if any_ok else (prev_card or {}).get("fetched"), "sections": secs}
-
-
+ 
+ 
 def main():
     with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as f:
         config = json.load(f)
@@ -279,9 +374,10 @@ def main():
     with open(os.path.join(ROOT, "data.json"), "w", encoding="utf-8") as f:
         json.dump({"updated": now_iso, "timezone": tz.key, "cards": cards}, f, ensure_ascii=False, indent=1)
     print(f"готово, карточек: {len(cards)}")
-
-
+ 
+ 
 if __name__ == "__main__":
     main()
-
+ 
 # КОНЕЦ ФАЙЛА collect.py
+ 
