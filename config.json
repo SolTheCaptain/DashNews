@@ -18,9 +18,21 @@
           "title": "Ближайший матч",
           "type": "teams_next",
           "teams": [
-            { "label": "Спартак", "name": "Spartak Moscow", "country": "Russia" },
-            { "label": "Реал", "name": "Real Madrid", "country": "Spain" },
-            { "label": "Манчестер Юнайтед", "name": "Manchester United", "country": "England" }
+            {
+              "label": "Спартак",
+              "name": "Spartak Moscow",
+              "country": "Russia"
+            },
+            {
+              "label": "Реал",
+              "name": "Real Madrid",
+              "country": "Spain"
+            },
+            {
+              "label": "Манчестер Юнайтед",
+              "name": "Manchester United",
+              "country": "England"
+            }
           ]
         },
         {
@@ -28,7 +40,16 @@
           "title": "Лига чемпионов — турнирная таблица",
           "type": "fd_table",
           "comp": "CL",
-          "cutoffs": [[8, "1–8: сразу в 1/8 финала"], [24, "9–24: плей-офф; ниже: вылет"]]
+          "cutoffs": [
+            [
+              8,
+              "1–8: сразу в 1/8 финала"
+            ],
+            [
+              24,
+              "9–24: плей-офф; ниже: вылет"
+            ]
+          ]
         },
         {
           "id": "ucl-next",
@@ -38,6 +59,22 @@
           "days": 30,
           "first_day_only": true
         }
+      ]
+    },
+    {
+      "id": "tennis",
+      "title": "Теннис — Большой шлем",
+      "type": "slam_russians",
+      "slams": [
+        {
+          "name": "Australian Open",
+          "start": "2027-01-17",
+          "end": "2027-01-31"
+        }
+      ],
+      "top": 100,
+      "born_in": [
+        "russia"
       ]
     }
   ]
