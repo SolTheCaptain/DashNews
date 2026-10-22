@@ -90,6 +90,25 @@ def team_next(card, tz):
     return lines
 
 
+def teams_next(card, tz):
+    """Несколько команд подряд: ближайший матч каждой."""
+    lines, fails = [], 0
+    for t in card["teams"]:
+        label = t.get("label") or t["name"]
+        if lines:
+            lines.append("")
+        lines.append(label)
+        try:
+            lines += ["  " + x for x in team_next({"team": t["name"], "country": t.get("country")}, tz)]
+        except Exception as e:
+            fails += 1
+            print(f"::warning::{label}: {e}")
+            lines.append(f"  не удалось получить данные ({e})")
+    if fails == len(card["teams"]):
+        raise RuntimeError("не удалось получить данные ни по одной команде")
+    return lines
+
+
 # ---------- источник: football-data.org (турниры) ----------
 
 def fd_get(path):
@@ -116,15 +135,28 @@ def fd_table(card, tz):
 
 
 def fd_next(card, tz):
-    days = min(int(card.get("days", 9)), 10)  # у источника ограничение на диапазон дат
+    days = min(int(card.get("days", 9)), 60)
+    first_only = bool(card.get("first_day_only"))  # показать только ближайший игровой день
     now = datetime.now(timezone.utc)
-    frm, to = now.strftime("%Y-%m-%d"), (now + timedelta(days=days)).strftime("%Y-%m-%d")
-    j = fd_get(f"/competitions/{card['comp']}/matches?dateFrom={frm}&dateTo={to}")
     ok = {"SCHEDULED", "TIMED", "IN_PLAY", "PAUSED"}
-    ms = sorted((m for m in (j.get("matches") or []) if m.get("status") in ok),
-                key=lambda m: m["utcDate"])
+    seen, ms = set(), []
+    for start in range(0, days, 10):  # источник отдаёт не больше 10 дней за один запрос
+        frm = (now + timedelta(days=start)).strftime("%Y-%m-%d")
+        to = (now + timedelta(days=min(start + 10, days))).strftime("%Y-%m-%d")
+        j = fd_get(f"/competitions/{card['comp']}/matches?dateFrom={frm}&dateTo={to}")
+        for m in j.get("matches") or []:
+            key = m.get("id") or (m["utcDate"], m["homeTeam"].get("name"))
+            if m.get("status") in ok and key not in seen:
+                seen.add(key)
+                ms.append(m)
+        if first_only and ms:
+            break  # нашли ближайшие матчи, дальше искать не нужно
+    ms.sort(key=lambda m: m["utcDate"])
     if not ms:
         return [f"В ближайшие {days} дней матчей нет."]
+    if first_only:
+        first_date = parse_utc(ms[0]["utcDate"]).astimezone(tz).date()
+        ms = [m for m in ms if parse_utc(m["utcDate"]).astimezone(tz).date() == first_date]
     lines = ["(первая команда — хозяева, вторая — гости)"]
     cur = ""
     for m in ms:
@@ -169,7 +201,7 @@ def weather(card, tz):
     names = ["Сегодня", "Завтра", "Послезавтра"]
     for i in range(len(d["time"])):
         lines.append(f"{names[i]}: {signed(d['temperature_2m_min'][i])}…{signed(d['temperature_2m_max'][i])}°, "
-                     f"{WMO.get(d['weather_code'][i], '—')}, осадки {d['precipitation_probability_max'][i]}%")
+                     f"{WMO.get(d['weather_code'][i], '—')}, {d['precipitation_probability_max'][i]}%")
     return lines
 
 
@@ -177,6 +209,7 @@ def weather(card, tz):
 
 HANDLERS = {
     "team_next": team_next,
+    "teams_next": teams_next,
     "fd_table": fd_table,
     "fd_next": fd_next,
     "weather": weather,
@@ -202,6 +235,31 @@ def load_previous():
     return prev
 
 
+def run_section(sec, tz, prev):
+    """Один блок: возвращает словарь для data.json. Ошибка не роняет остальные."""
+    out = {"id": sec["id"], "title": sec["title"]}
+    try:
+        fn = HANDLERS.get(sec.get("type"))
+        if not fn:
+            raise RuntimeError(f"неизвестный тип блока: {sec.get('type')}")
+        out.update(ok=True, lines=fn(sec, tz))
+        print(f"ok       {sec['id']}")
+    except Exception as e:
+        print(f"::warning::{sec['id']}: {e}")
+        out.update(ok=False, error=str(e), lines=(prev or {}).get("lines") or [])
+    return out
+
+
+def run_group(card, tz, prev_card, now_iso):
+    """Карточка с подблоками и одной общей пометкой «обновлено»."""
+    prev_secs = {s["id"]: s for s in (prev_card or {}).get("sections", [])}
+    secs = [run_section(s, tz, prev_secs.get(s["id"]))
+            for s in card["sections"] if s.get("enabled", True) is not False]
+    any_ok = any(s["ok"] for s in secs)
+    return {"id": card["id"], "title": card["title"], "ok": all(s["ok"] for s in secs),
+            "fetched": now_iso if any_ok else (prev_card or {}).get("fetched"), "sections": secs}
+
+
 def main():
     with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as f:
         config = json.load(f)
@@ -212,23 +270,18 @@ def main():
     for card in config["cards"]:
         if card.get("enabled", True) is False:
             continue
-        cid = card["id"]
-        out = {"id": cid, "title": card["title"]}
-        try:
-            fn = HANDLERS.get(card.get("type"))
-            if not fn:
-                raise RuntimeError(f"неизвестный тип блока: {card.get('type')}")
-            out.update(ok=True, lines=fn(card, tz), fetched=now_iso)
-            print(f"ok       {cid}")
-        except Exception as e:  # ошибка одного блока не должна ронять остальные
-            print(f"::warning::{cid}: {e}")
-            p = prev.get(cid) or {}
-            out.update(ok=False, error=str(e), lines=p.get("lines") or [], fetched=p.get("fetched"))
+        if card.get("type") == "group":
+            cards.append(run_group(card, tz, prev.get(card["id"]), now_iso))
+            continue
+        out = run_section(card, tz, prev.get(card["id"]))
+        out["fetched"] = now_iso if out["ok"] else (prev.get(card["id"]) or {}).get("fetched")
         cards.append(out)
     with open(os.path.join(ROOT, "data.json"), "w", encoding="utf-8") as f:
         json.dump({"updated": now_iso, "timezone": tz.key, "cards": cards}, f, ensure_ascii=False, indent=1)
-    print(f"готово: {sum(c['ok'] for c in cards)} из {len(cards)} блоков обновлено")
+    print(f"готово, карточек: {len(cards)}")
 
 
 if __name__ == "__main__":
     main()
+
+# КОНЕЦ ФАЙЛА collect.py
