@@ -139,61 +139,45 @@ def fd_next(card, tz):
     return lines
 
 
+# ---------- источник: Open-Meteo (погода, ключ не нужен) ----------
+
+WMO = {
+    0: "ясно", 1: "в основном ясно", 2: "переменная облачность", 3: "пасмурно",
+    45: "туман", 48: "изморозь", 51: "морось", 53: "морось", 55: "сильная морось",
+    56: "ледяная морось", 57: "ледяная морось", 61: "небольшой дождь", 63: "дождь",
+    65: "сильный дождь", 66: "ледяной дождь", 67: "ледяной дождь", 71: "небольшой снег",
+    73: "снег", 75: "сильный снег", 77: "снежные зёрна", 80: "ливень", 81: "ливень",
+    82: "сильный ливень", 85: "снегопад", 86: "сильный снегопад", 95: "гроза",
+    96: "гроза с градом", 99: "гроза с градом",
+}
+
+
+def signed(x):
+    n = round(x)
+    return f"{'+' if n > 0 else ''}{n}"
+
+
+def weather(card, tz):
+    url = (f"https://api.open-meteo.com/v1/forecast?latitude={card['lat']}&longitude={card['lon']}"
+           "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m"
+           "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
+           f"&timezone={quote(tz.key)}&forecast_days=3&wind_speed_unit=ms")
+    w = http_json(url)
+    c, d = w["current"], w["daily"]
+    lines = [f"Сейчас: {signed(c['temperature_2m'])}°, ощущается {signed(c['apparent_temperature'])}°, "
+             f"{WMO.get(c['weather_code'], '—')}, ветер {round(c['wind_speed_10m'])} м/с"]
+    names = ["Сегодня", "Завтра", "Послезавтра"]
+    for i in range(len(d["time"])):
+        lines.append(f"{names[i]}: {signed(d['temperature_2m_min'][i])}…{signed(d['temperature_2m_max'][i])}°, "
+                     f"{WMO.get(d['weather_code'][i], '—')}, осадки {d['precipitation_probability_max'][i]}%")
+    return lines
+
+
 # ---------- реестр типов блоков ----------
 
 HANDLERS = {
     "team_next": team_next,
     "fd_table": fd_table,
     "fd_next": fd_next,
+    "weather": weather,
 }
-
-
-# ---------- запуск ----------
-
-def load_previous():
-    """Прошлые данные нужны, чтобы при сбое источника показать последнее удачное."""
-    prev = {}
-    try:
-        url = os.environ.get("PREV_URL")
-        if url:
-            data = http_json(url + "?t=" + str(int(datetime.now().timestamp())))
-        else:
-            with open(os.path.join(ROOT, "data.json"), encoding="utf-8") as f:
-                data = json.load(f)
-        for c in data.get("cards", []):
-            prev[c["id"]] = c
-    except Exception:
-        pass
-    return prev
-
-
-def main():
-    with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as f:
-        config = json.load(f)
-    tz = ZoneInfo(config.get("timezone", "Europe/Moscow"))
-    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    prev = load_previous()
-    cards = []
-    for card in config["cards"]:
-        if card.get("enabled", True) is False:
-            continue
-        cid = card["id"]
-        out = {"id": cid, "title": card["title"]}
-        try:
-            fn = HANDLERS.get(card.get("type"))
-            if not fn:
-                raise RuntimeError(f"неизвестный тип блока: {card.get('type')}")
-            out.update(ok=True, lines=fn(card, tz), fetched=now_iso)
-            print(f"ok       {cid}")
-        except Exception as e:  # ошибка одного блока не должна ронять остальные
-            print(f"::warning::{cid}: {e}")
-            p = prev.get(cid) or {}
-            out.update(ok=False, error=str(e), lines=p.get("lines") or [], fetched=p.get("fetched"))
-        cards.append(out)
-    with open(os.path.join(ROOT, "data.json"), "w", encoding="utf-8") as f:
-        json.dump({"updated": now_iso, "timezone": tz.key, "cards": cards}, f, ensure_ascii=False, indent=1)
-    print(f"готово: {sum(c['ok'] for c in cards)} из {len(cards)} блоков обновлено")
-
-
-if __name__ == "__main__":
-    main()
