@@ -181,3 +181,54 @@ HANDLERS = {
     "fd_next": fd_next,
     "weather": weather,
 }
+
+
+# ---------- запуск ----------
+
+def load_previous():
+    """Прошлые данные нужны, чтобы при сбое источника показать последнее удачное."""
+    prev = {}
+    try:
+        url = os.environ.get("PREV_URL")
+        if url:
+            data = http_json(url + "?t=" + str(int(datetime.now().timestamp())))
+        else:
+            with open(os.path.join(ROOT, "data.json"), encoding="utf-8") as f:
+                data = json.load(f)
+        for c in data.get("cards", []):
+            prev[c["id"]] = c
+    except Exception:
+        pass
+    return prev
+
+
+def main():
+    with open(os.path.join(ROOT, "config.json"), encoding="utf-8") as f:
+        config = json.load(f)
+    tz = ZoneInfo(config.get("timezone", "Europe/Moscow"))
+    now_iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    prev = load_previous()
+    cards = []
+    for card in config["cards"]:
+        if card.get("enabled", True) is False:
+            continue
+        cid = card["id"]
+        out = {"id": cid, "title": card["title"]}
+        try:
+            fn = HANDLERS.get(card.get("type"))
+            if not fn:
+                raise RuntimeError(f"неизвестный тип блока: {card.get('type')}")
+            out.update(ok=True, lines=fn(card, tz), fetched=now_iso)
+            print(f"ok       {cid}")
+        except Exception as e:  # ошибка одного блока не должна ронять остальные
+            print(f"::warning::{cid}: {e}")
+            p = prev.get(cid) or {}
+            out.update(ok=False, error=str(e), lines=p.get("lines") or [], fetched=p.get("fetched"))
+        cards.append(out)
+    with open(os.path.join(ROOT, "data.json"), "w", encoding="utf-8") as f:
+        json.dump({"updated": now_iso, "timezone": tz.key, "cards": cards}, f, ensure_ascii=False, indent=1)
+    print(f"готово: {sum(c['ok'] for c in cards)} из {len(cards)} блоков обновлено")
+
+
+if __name__ == "__main__":
+    main()
