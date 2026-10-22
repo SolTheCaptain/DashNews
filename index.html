@@ -24,20 +24,36 @@ function fmt(iso, tz) {
   });
 }
 
+// Один блок: заголовок (h2 или h3), текст, предупреждение при сбое
+function block(parent, tag, item, tz) {
+  const h = document.createElement(tag);
+  h.textContent = item.title;
+  const pre = document.createElement("pre");
+  pre.textContent = item.lines && item.lines.length ? item.lines.join("\n") : "Нет данных.";
+  parent.append(h, pre);
+  if (!item.ok) {
+    const warn = document.createElement("small");
+    warn.textContent = "⚠ не удалось обновить (" + item.error + "). Показаны прошлые данные. ";
+    parent.append(warn);
+  }
+}
+
 function render(data) {
   const tz = data.timezone || "Europe/Moscow";
   root.innerHTML = "";
   for (const c of data.cards) {
     const sec = document.createElement("section");
-    const h = document.createElement("h2");
-    h.textContent = c.title;
-    const pre = document.createElement("pre");
-    pre.textContent = c.lines && c.lines.length ? c.lines.join("\n") : "Нет данных.";
+    if (c.sections) {
+      const h = document.createElement("h2");
+      h.textContent = c.title;
+      sec.append(h);
+      for (const s of c.sections) block(sec, "h3", s, tz);
+    } else {
+      block(sec, "h2", c, tz);
+    }
     const small = document.createElement("small");
-    small.textContent = c.ok
-      ? "обновлено " + fmt(c.fetched, tz)
-      : "⚠ не удалось обновить (" + c.error + "). " + (c.fetched ? "Показаны данные от " + fmt(c.fetched, tz) + "." : "");
-    sec.append(h, pre, small, document.createElement("hr"));
+    small.textContent = "обновлено " + fmt(c.fetched, tz);
+    sec.append(small, document.createElement("hr"));
     root.appendChild(sec);
   }
   stamp.textContent = "данные собраны " + fmt(data.updated, tz);
@@ -61,3 +77,4 @@ load();
 </script>
 </body>
 </html>
+<!-- КОНЕЦ ФАЙЛА index.html -->
