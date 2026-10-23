@@ -82,6 +82,11 @@
       "title": "PC Games",
       "type": "steam_upcoming",
       "count": 5
+    },
+    {
+      "id": "mtg",
+      "title": "MTG Roadmap",
+      "type": "mtg_roadmap"
     }
   ]
 }
