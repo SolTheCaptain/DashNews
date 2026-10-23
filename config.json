@@ -37,7 +37,7 @@
         },
         {
           "id": "ucl-table",
-          "title": "Лига чемпионов — турнирная таблица",
+          "title": "Лига чемпионов",
           "type": "fd_table",
           "comp": "CL",
           "cutoffs": [
@@ -53,7 +53,7 @@
         },
         {
           "id": "ucl-next",
-          "title": "Лига чемпионов — ближайшие матчи",
+          "title": "Ближайшие матчи",
           "type": "fd_next",
           "comp": "CL",
           "days": 30,
@@ -76,6 +76,12 @@
       "born_in": [
         "russia"
       ]
+    },
+    {
+      "id": "pcgames",
+      "title": "PC Games",
+      "type": "steam_upcoming",
+      "count": 5
     }
   ]
 }
