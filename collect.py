@@ -407,7 +407,7 @@ def quotes(card, tz):
 # ---------- источник: Google Таблица с задачами (доступ «все, у кого есть ссылка») ----------
 
 def sheet_tasks(card, tz):
-    """Задачи из таблицы (колонки: Дата, Время, Контакт, Описание); прошедшие даты не показываем."""
+    """Задачи из таблицы (колонки: Дата, Время, Контакт, Описание) на ближайшие N дней, включая сегодня."""
     sid = os.environ.get("TASKS_SHEET_ID")
     if not sid:
         raise RuntimeError("нет секрета TASKS_SHEET_ID")
@@ -417,6 +417,7 @@ def sheet_tasks(card, tz):
     if text.lstrip().startswith("<"):
         raise RuntimeError("таблица недоступна: проверь доступ «все, у кого есть ссылка»")
     today = datetime.now(tz).date()
+    days = int(card.get("days", 10))
     dated, undated = [], []
     for row in csv.DictReader(io.StringIO(text)):
         row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
@@ -441,12 +442,12 @@ def sheet_tasks(card, tz):
         text_ = (desc or "(без описания)") + (f" ({contact})" if contact else "")
         if not d:
             undated.append(text_)
-        elif d >= today:
+        elif today <= d < today + timedelta(days=days):
             when = day_label(d) + (f" {d.year}" if d.year != today.year else "")
             dated.append((d, t or datetime.min.time(), f"{when}{f', {t:%H:%M}' if t else ''} — {text_}"))
     dated.sort(key=lambda x: (x[0], x[1]))
     lines = [x[2] for x in dated] + [f"без даты — {u}" for u in undated]
-    return lines or ["Задач нет."]
+    return lines or [f"В ближайшие {days} дн. задач нет."]
 
 
 # ---------- реестр типов блоков ----------
