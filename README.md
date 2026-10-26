@@ -28,6 +28,7 @@
 | `slam_russians` | ближайший шлем: невылетевшие игроки из топ-N, родившиеся в нужной стране, и их матч (ESPN) | `slams`, `top`, `born_in` |
 | `steam_upcoming` | топ-N ожидаемых игр до конца года из «Популярных ожидаемых» Steam | `count`, `scan` |
 | `mtg_roadmap` | все бумажные сеты Magic до конца года, без даты — TBA (Scryfall) | `extra` (названия сетов без даты вручную), `skip_types` |
+| `quotes` | курсы ЦБ к рублю и BTC/RUR (cbr-xml-daily.ru, CoinGecko) | `fiat` (коды валют ЦБ, по умолчанию USD, EUR) |
 
 ## Убрать блок
 
