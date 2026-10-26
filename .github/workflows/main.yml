@@ -31,6 +31,7 @@ jobs:
         run: python collect.py
         env:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          TASKS_SHEET_ID: ${{ secrets.TASKS_SHEET_ID }}
           PREV_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data.json
 
       - name: Подготовить сайт
