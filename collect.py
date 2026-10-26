@@ -372,6 +372,36 @@ def weather(card, tz):
     return lines
 
 
+# ---------- источник: ЦБ РФ и CoinGecko (котировки, ключи не нужны) ----------
+
+def num(v, nd=2):
+    return f"{v:,.{nd}f}".replace(",", "\xa0").replace(".", ",")
+
+
+def pct(p):
+    return f"{p:+.1f}".replace(".", ",") + "%"
+
+
+def quotes(card, tz):
+    """Курсы ЦБ к рублю (с изменением к прошлому курсу) и BTC/RUR."""
+    cbr = http_json("https://www.cbr-xml-daily.ru/daily_json.js")
+    lines = []
+    for code in card.get("fiat", ["USD", "EUR"]):
+        v = cbr["Valute"][code]
+        val, prev = v["Value"] / v["Nominal"], v["Previous"] / v["Nominal"]
+        lines.append(f"{code}/RUR — {num(val)} ({pct((val / prev - 1) * 100)})")
+    try:
+        btc = http_json("https://api.coingecko.com/api/v3/simple/price"
+                        "?ids=bitcoin&vs_currencies=rub&include_24hr_change=true")["bitcoin"]
+        lines.append(f"BTC/RUR — {num(btc['rub'], 0)} ({pct(btc['rub_24h_change'])})")
+    except Exception as e:
+        print(f"::warning::quotes BTC: {e}")
+        lines.append("BTC/RUR — нет данных")
+    d = datetime.fromisoformat(cbr["Date"]).date()
+    lines += ["", f"USD, EUR: курс ЦБ на {d.day} {MONTHS[d.month - 1]}; BTC: CoinGecko, за 24 ч"]
+    return lines
+
+
 # ---------- реестр типов блоков ----------
 
 HANDLERS = {
@@ -380,6 +410,7 @@ HANDLERS = {
     "fd_table": fd_table,
     "fd_next": fd_next,
     "weather": weather,
+    "quotes": quotes,
     "slam_russians": slam_russians,
     "steam_upcoming": steam_upcoming,
     "mtg_roadmap": mtg_roadmap,
