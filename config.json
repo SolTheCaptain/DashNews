@@ -2,6 +2,15 @@
   "timezone": "Europe/Moscow",
   "cards": [
     {
+      "id": "quotes",
+      "title": "Котировки",
+      "type": "quotes",
+      "fiat": [
+        "USD",
+        "EUR"
+      ]
+    },
+    {
       "id": "weather",
       "title": "Погода — Москва",
       "type": "weather",
