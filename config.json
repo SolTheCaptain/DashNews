@@ -11,6 +11,11 @@
       ]
     },
     {
+      "id": "tasks",
+      "title": "Задачи",
+      "type": "sheet_tasks"
+    },
+    {
       "id": "weather",
       "title": "Погода — Москва",
       "type": "weather",
