@@ -29,6 +29,7 @@
 | `steam_upcoming` | топ-N ожидаемых игр до конца года из «Популярных ожидаемых» Steam | `count`, `scan` |
 | `mtg_roadmap` | все бумажные сеты Magic до конца года, без даты — TBA (Scryfall) | `extra` (названия сетов без даты вручную), `skip_types` |
 | `quotes` | курсы ЦБ к рублю и BTC/RUR (cbr-xml-daily.ru, CoinGecko) | `fiat` (коды валют ЦБ, по умолчанию USD, EUR) |
+| `sheet_tasks` | задачи из Google Таблицы (Дата, Время, Контакт, Описание); id таблицы в секрете `TASKS_SHEET_ID` | `days` (окно в днях, по умолчанию 10), `gid` (номер листа, по умолчанию 0) |
 
 ## Убрать блок
 
@@ -42,4 +43,4 @@
 ## Ключи
 
 Лежат в секретах репозитория (Settings → Secrets and variables → Actions):
-`FOOTBALL_DATA_KEY` — ключ football-data.org. В файлы ключи не записываются.
+`FOOTBALL_DATA_KEY` — ключ football-data.org, `TASKS_SHEET_ID` — id таблицы с задачами. В файлы ключи не записываются.
