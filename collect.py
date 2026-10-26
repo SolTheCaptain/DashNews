@@ -9,6 +9,8 @@
   2. добавить её в словарь HANDLERS внизу файла
   3. использовать "type": "мой_блок" в config.json
 """
+import csv
+import io
 import json
 import os
 import re
@@ -87,9 +89,9 @@ def team_next(card, tz):
     if w:
         loc = w.astimezone(tz)
         lines.append(f"{day_label(loc)}, {loc:%H:%M} ({tz.key})")
-    lines.append("Турнир: " + (ev.get("strLeague") or "—"))
-    if ev.get("strVenue"):
-        lines.append("Стадион: " + ev["strVenue"])
+    where = ", ".join(x for x in (ev.get("strLeague"), ev.get("strVenue")) if x)
+    if where:
+        lines.append(where)
     return lines
 
 
@@ -402,6 +404,51 @@ def quotes(card, tz):
     return lines
 
 
+# ---------- источник: Google Таблица с задачами (доступ «все, у кого есть ссылка») ----------
+
+def sheet_tasks(card, tz):
+    """Задачи из таблицы (колонки: Дата, Время, Контакт, Описание); прошедшие даты не показываем."""
+    sid = os.environ.get("TASKS_SHEET_ID")
+    if not sid:
+        raise RuntimeError("нет секрета TASKS_SHEET_ID")
+    url = f"https://docs.google.com/spreadsheets/d/{quote(sid)}/export?format=csv&gid={card.get('gid', 0)}"
+    with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0 (dashboard-collector)"}), timeout=30) as r:
+        text = r.read().decode("utf-8-sig")
+    if text.lstrip().startswith("<"):
+        raise RuntimeError("таблица недоступна: проверь доступ «все, у кого есть ссылка»")
+    today = datetime.now(tz).date()
+    dated, undated = [], []
+    for row in csv.DictReader(io.StringIO(text)):
+        row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        desc, contact = row.get("описание", ""), row.get("контакт", "")
+        raw_d, raw_t = row.get("дата", ""), row.get("время", "").replace(".", ":")
+        if not (desc or raw_d):
+            continue
+        d = None
+        for fmt in ("%d.%m.%Y", "%d.%m.%y"):
+            try:
+                d = datetime.strptime(raw_d, fmt).date()
+                break
+            except ValueError:
+                pass
+        t = None
+        for fmt in ("%H:%M", "%H"):
+            try:
+                t = datetime.strptime(raw_t, fmt).time()
+                break
+            except ValueError:
+                pass
+        text_ = (desc or "(без описания)") + (f" ({contact})" if contact else "")
+        if not d:
+            undated.append(text_)
+        elif d >= today:
+            when = day_label(d) + (f" {d.year}" if d.year != today.year else "")
+            dated.append((d, t or datetime.min.time(), f"{when}{f', {t:%H:%M}' if t else ''} — {text_}"))
+    dated.sort(key=lambda x: (x[0], x[1]))
+    lines = [x[2] for x in dated] + [f"без даты — {u}" for u in undated]
+    return lines or ["Задач нет."]
+
+
 # ---------- реестр типов блоков ----------
 
 HANDLERS = {
@@ -411,6 +458,7 @@ HANDLERS = {
     "fd_next": fd_next,
     "weather": weather,
     "quotes": quotes,
+    "sheet_tasks": sheet_tasks,
     "slam_russians": slam_russians,
     "steam_upcoming": steam_upcoming,
     "mtg_roadmap": mtg_roadmap,
