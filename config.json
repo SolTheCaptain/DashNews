@@ -13,7 +13,8 @@
     {
       "id": "tasks",
       "title": "Задачи",
-      "type": "sheet_tasks"
+      "type": "sheet_tasks",
+      "days": 10
     },
     {
       "id": "weather",
