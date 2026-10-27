@@ -399,8 +399,6 @@ def quotes(card, tz):
     except Exception as e:
         print(f"::warning::quotes BTC: {e}")
         lines.append("BTC/RUR — нет данных")
-    d = datetime.fromisoformat(cbr["Date"]).date()
-    lines += ["", f"USD, EUR: курс ЦБ на {d.day} {MONTHS[d.month - 1]}; BTC: CoinGecko, за 24 ч"]
     return lines
 
 
