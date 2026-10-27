@@ -3,78 +3,118 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0a1a">
 <title>Дашборд</title>
+<style>
+:root {
+  --bg: #0f0a1a;
+  --panel: #1a1230;
+  --panel2: #231a40;
+  --line: #3a2c60;
+  --text: #e6e0f4;
+  --muted: #9488b6;
+  --gold: #f2c14e;
+  --gold-soft: #d9b45f;
+  --up: #6fd39a;
+  --down: #ff8f9d;
+  --warn: #ffb454;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px 18px 16px;
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: radial-gradient(1100px 520px at 85% -8%, #35256455, transparent), var(--bg);
+}
+
+header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+h1 {
+  margin: 0; color: var(--gold);
+  font: 700 1.3rem Georgia, "Times New Roman", serif;
+  letter-spacing: .16em; text-transform: uppercase;
+  text-shadow: 0 0 18px #f2c14e33;
+}
+.right { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+button {
+  cursor: pointer; padding: 5px 14px; border-radius: 999px;
+  color: var(--gold); background: #f2c14e12; border: 1px solid #f2c14e66;
+  font: 600 12px system-ui, sans-serif;
+}
+button:hover { background: #f2c14e24; }
+
+main {
+  flex: 1; min-height: 0; display: grid; gap: 12px;
+  grid-template-columns: minmax(0, .9fr) minmax(0, .9fr) minmax(0, 2.2fr);
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  grid-auto-rows: minmax(220px, auto);
+}
+.card[data-id="football"] { grid-column: 3; grid-row: 1 / span 3; }
+
+.card {
+  display: flex; flex-direction: column; min-height: 0;
+  padding: 12px 14px;
+  background: linear-gradient(165deg, var(--panel2), var(--panel));
+  border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 6px 24px #0007;
+}
+h2, h3 {
+  flex: none; margin: 0 0 8px; color: var(--gold);
+  font: 700 clamp(.9rem, .95vw, 1.2rem) Georgia, "Times New Roman", serif;
+  letter-spacing: .12em; text-transform: uppercase;
+}
+h3 { font-size: clamp(.78rem, .8vw, 1rem); color: var(--gold-soft); margin-bottom: 6px; }
+.body {
+  flex: 1; min-height: 0; overflow: auto;
+  scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+}
+pre {
+  margin: 0; white-space: pre-wrap; color: var(--text);
+  font: clamp(12.5px, .8vw, 16px)/1.55 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+pre .day { color: var(--gold-soft); font-weight: 700; }
+pre .note, pre .th, pre .cut { color: var(--muted); }
+pre .cut { font-size: 11px; }
+pre .up { color: var(--up); }
+pre .down { color: var(--down); }
+
+.foot { flex: none; margin-top: 6px; color: var(--muted); font-size: clamp(11px, .6vw, 13px); }
+.warn {
+  display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 999px;
+  color: var(--warn); background: #ffb45418; border: 1px solid #ffb45455; font-size: 11px;
+}
+
+.subs {
+  flex: 1; min-height: 0; display: grid; gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-rows: minmax(0, 3fr) minmax(0, 2fr);
+}
+.sub {
+  display: flex; flex-direction: column; min-height: 0; padding: 9px 11px;
+  background: #ffffff08; border: 1px solid var(--line); border-radius: 10px;
+}
+.sub[data-id="ucl-table"] { grid-column: 2; grid-row: 1 / span 2; }
+.sub[data-id="ucl-table"] pre { white-space: pre; font-size: clamp(11px, .64vw, 13.5px); }
+
+@media (max-width: 999px) {
+  html, body { height: auto; }
+  main { display: flex; flex-direction: column; }
+  .card[data-id="football"] { grid-column: auto; grid-row: auto; }
+  .subs { display: flex; flex-direction: column; }
+  .body { overflow: visible; }
+  .sub[data-id="ucl-table"] .body { overflow-x: auto; }
+  header { flex-wrap: wrap; }
+}
+</style>
 </head>
 <body>
-<h1>Дашборд</h1>
-<p><button id="reload">Перечитать данные</button> <span id="stamp"></span></p>
-<div id="cards"></div>
+<header>
+  <h1>Дашборд</h1>
+  <div class="right"><span id="stamp"></span><button id="reload">↻ Обновить</button></div>
+</header>
+<main id="cards"></main>
 
 <script>
-// Страница ничего не запрашивает у сторонних сайтов: просто показывает data.json,
-// который собирает collect.py по расписанию. Блоки и их порядок задаются в config.json.
-
-const root = document.getElementById("cards");
-const stamp = document.getElementById("stamp");
-
-function fmt(iso, tz) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("ru-RU", {
-    timeZone: tz, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
-  });
-}
-
-// Один блок: заголовок (h2 или h3), текст, предупреждение при сбое
-function block(parent, tag, item, tz) {
-  const h = document.createElement(tag);
-  h.textContent = item.title;
-  const pre = document.createElement("pre");
-  pre.textContent = item.lines && item.lines.length ? item.lines.join("\n") : "Нет данных.";
-  parent.append(h, pre);
-  if (!item.ok) {
-    const warn = document.createElement("small");
-    warn.textContent = "⚠ не удалось обновить (" + item.error + "). Показаны прошлые данные. ";
-    parent.append(warn);
-  }
-}
-
-function render(data) {
-  const tz = data.timezone || "Europe/Moscow";
-  root.innerHTML = "";
-  for (const c of data.cards) {
-    const sec = document.createElement("section");
-    if (c.sections) {
-      const h = document.createElement("h2");
-      h.textContent = c.title;
-      sec.append(h);
-      for (const s of c.sections) block(sec, "h3", s, tz);
-    } else {
-      block(sec, "h2", c, tz);
-    }
-    const small = document.createElement("small");
-    small.textContent = "обновлено " + fmt(c.fetched, tz);
-    sec.append(small, document.createElement("hr"));
-    root.appendChild(sec);
-  }
-  stamp.textContent = "данные собраны " + fmt(data.updated, tz);
-}
-
-async function load() {
-  stamp.textContent = "загрузка…";
-  try {
-    const r = await fetch("data.json?t=" + Date.now(), { cache: "no-store" });
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    render(await r.json());
-  } catch (e) {
-    root.textContent = "Не удалось загрузить data.json: " + e.message +
-      " (страницу нужно открывать по ссылке GitHub Pages, а не файлом с диска)";
-    stamp.textContent = "";
-  }
-}
-
-document.getElementById("reload").onclick = load;
-load();
-</script>
-</body>
-</html>
-<!-- КОНЕЦ ФАЙЛА index.html -->
+// Страница
