@@ -18,7 +18,7 @@
     },
     {
       "id": "weather",
-      "title": "Погода — Москва",
+      "title": "Погода",
       "type": "weather",
       "lat": 55.75,
       "lon": 37.62
