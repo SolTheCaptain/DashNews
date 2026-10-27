@@ -117,4 +117,99 @@ pre .down { color: var(--down); }
 <main id="cards"></main>
 
 <script>
-// Страница
+// Страница ничего не запрашивает у сторонних сайтов: просто показывает data.json,
+// который собирает collect.py по расписанию. Блоки и их порядок задаются в config.json.
+
+const root = document.getElementById("cards");
+const stamp = document.getElementById("stamp");
+
+function fmt(iso, tz) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("ru-RU", {
+    timeZone: tz, day: "numeric", month: "long", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+// Текст блока построчно; подсветка по виду строки, всё через textContent
+function fillPre(pre, lines) {
+  lines.forEach((line, i) => {
+    if (i) pre.append("\n");
+    let cls = "";
+    if (/^[А-ЯЁ]{2}, \d/.test(line)) cls = "day";
+    else if (/^---/.test(line)) cls = "cut";
+    else if (/^#\s/.test(line)) cls = "th";
+    else if (/^(время по |данные:|USD, EUR:)/.test(line)) cls = "note";
+    if (cls) { pre.append(el("span", cls, line)); return; }
+    const m = line.match(/^(.*)\(([+\-−]\d+(?:,\d+)?%)\)(.*)$/);
+    if (m) {
+      pre.append(m[1] + "(", el("span", m[2][0] === "+" ? "up" : "down", m[2]), ")" + m[3]);
+    } else {
+      pre.append(line);
+    }
+  });
+}
+
+function warnEl(item) {
+  return el("span", "warn", "⚠ не обновилось: " + item.error + " — показаны прошлые данные");
+}
+
+function render(data) {
+  const tz = data.timezone || "Europe/Moscow";
+  root.innerHTML = "";
+  for (const c of data.cards) {
+    const card = el("section", "card");
+    card.dataset.id = c.id;
+    card.append(el("h2", "", c.title));
+    const body = el("div", c.sections ? "subs" : "body");
+    if (c.sections) {
+      for (const s of c.sections) {
+        const sub = el("div", "sub");
+        sub.dataset.id = s.id;
+        sub.append(el("h3", "", s.title));
+        const sb = el("div", "body");
+        const pre = el("pre");
+        fillPre(pre, s.lines && s.lines.length ? s.lines : ["Нет данных."]);
+        sb.append(pre);
+        if (!s.ok) sb.append(warnEl(s));
+        sub.append(sb);
+        body.append(sub);
+      }
+    } else {
+      const pre = el("pre");
+      fillPre(pre, c.lines && c.lines.length ? c.lines : ["Нет данных."]);
+      body.append(pre);
+      if (!c.ok) body.append(warnEl(c));
+    }
+    card.append(body, el("div", "foot", "обновлено " + fmt(c.fetched, tz)));
+    root.append(card);
+  }
+  stamp.textContent = "данные собраны " + fmt(data.updated, tz);
+}
+
+async function load() {
+  stamp.textContent = "загрузка…";
+  try {
+    const r = await fetch("data.json?t=" + Date.now(), { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    render(await r.json());
+  } catch (e) {
+    root.textContent = "Не удалось загрузить data.json: " + e.message +
+      " (страницу нужно открывать по ссылке GitHub Pages, а не файлом с диска)";
+    stamp.textContent = "";
+  }
+}
+
+document.getElementById("reload").onclick = load;
+setInterval(load, 10 * 60 * 1000);
+load();
+</script>
+</body>
+</html>
+<!-- КОНЕЦ ФАЙЛА index.html -->
