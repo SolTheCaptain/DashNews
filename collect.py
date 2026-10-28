@@ -404,7 +404,8 @@ def quotes(card, tz):
 # ---------- источник: Google Таблица с задачами (доступ «все, у кого есть ссылка») ----------
 
 def sheet_tasks(card, tz):
-    """Задачи из таблицы (колонки: Дата, Время, Контакт, Описание) на ближайшие N дней, включая сегодня."""
+    """Задачи из таблицы (колонки: Дата, Время, Контакт, Описание) на ближайшие N дней, включая сегодня.
+    Год в дате игнорируется: событие считается ежегодным (дни рождения), берём ближайшее наступление дня и месяца."""
     sid = os.environ.get("TASKS_SHEET_ID")
     if not sid:
         raise RuntimeError("нет секрета TASKS_SHEET_ID")
@@ -423,12 +424,16 @@ def sheet_tasks(card, tz):
         if not (desc or raw_d):
             continue
         d = None
-        for fmt in ("%d.%m.%Y", "%d.%m.%y"):
-            try:
-                d = datetime.strptime(raw_d, fmt).date()
-                break
-            except ValueError:
-                pass
+        m = re.match(r"^(\d{1,2})\.(\d{1,2})\.?(?:\d{2,4})?\.?$", raw_d)
+        if m:
+            dd, mm = int(m.group(1)), int(m.group(2))
+            for y in (today.year, today.year + 1):
+                try:
+                    d = date(y, mm, dd)
+                except ValueError:
+                    d = date(y, mm, 28) if (mm, dd) == (2, 29) else None
+                if d and d >= today:
+                    break
         t = None
         for fmt in ("%H:%M", "%H"):
             try:
@@ -440,8 +445,7 @@ def sheet_tasks(card, tz):
         if not d:
             undated.append(text_)
         elif today <= d < today + timedelta(days=days):
-            when = day_label(d) + (f" {d.year}" if d.year != today.year else "")
-            dated.append((d, t or datetime.min.time(), f"{when}{f', {t:%H:%M}' if t else ''} — {text_}"))
+            dated.append((d, t or datetime.min.time(), f"{day_label(d)}{f', {t:%H:%M}' if t else ''} — {text_}"))
     dated.sort(key=lambda x: (x[0], x[1]))
     lines = [x[2] for x in dated] + [f"без даты — {u}" for u in undated]
     return lines or [f"В ближайшие {days} дн. задач нет."]
