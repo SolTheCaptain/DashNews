@@ -20,7 +20,7 @@
     },
     {
       "id": "tasks",
-      "title": "Задачи",
+      "title": "Задачи декады",
       "type": "sheet_tasks",
       "days": 10
     },

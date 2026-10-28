@@ -78,22 +78,65 @@ def team_badge(team_id):
 
 _RANKS = {}
 NOT_LEAGUE = re.compile(r"cup|champions|europa|conference|super|friendl|trophy|shield|copa|play-?off", re.I)
+# чемпионаты, которые football-data.org отдаёт целиком (у TheSportsDB на бесплатном ключе в таблице только первая пятёрка)
+FD_LEAGUES = {"english premier league": "PL", "spanish la liga": "PD", "italian serie a": "SA",
+              "german bundesliga": "BL1", "french ligue 1": "FL1", "dutch eredivisie": "DED",
+              "portuguese primeira liga": "PPL", "english league championship": "ELC"}
+
+
+def norm_team(s):
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower().replace("&", "and")
+    s = re.sub(r"[^a-z0-9 ]", " ", s)
+    s = re.sub(r"\b(fc|cf|afc|sc|ac|as|ssc|rc|club|de|the|calcio|fk)\b", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
 
 
 def league_ranks(ev):
     """Места команд в таблице чемпионата: только для лиги, не для кубков и еврокубков. Нет данных — пусто."""
-    lid, season = ev.get("idLeague"), ev.get("strSeason")
-    if not lid or not season or NOT_LEAGUE.search(ev.get("strLeague") or ""):
+    lid, season, league = ev.get("idLeague"), ev.get("strSeason"), ev.get("strLeague") or ""
+    if not lid or NOT_LEAGUE.search(league):
         return {}
     key = (lid, season)
-    if key not in _RANKS:
-        try:
+    if key in _RANKS:
+        return _RANKS[key]
+    res = {"ids": {}, "names": {}}
+    code = FD_LEAGUES.get(league.lower())
+    try:
+        if code and os.environ.get("FOOTBALL_DATA_KEY"):
+            j = fd_get(f"/competitions/{code}/standings")
+            st = next((x for x in j.get("standings") or [] if x.get("type") == "TOTAL"), None)
+            for r in (st or {}).get("table") or []:
+                for nm in (r["team"].get("name"), r["team"].get("shortName")):
+                    if nm:
+                        res["names"][norm_team(nm)] = r["position"]
+        if not res["names"] and season:
             rows = http_json(f"{TSDB}/lookuptable.php?l={lid}&s={season}").get("table") or []
-            _RANKS[key] = {str(r["idTeam"]): int(r["intRank"]) for r in rows if r.get("idTeam") and r.get("intRank")}
-        except Exception as e:
-            print(f"::warning::таблица лиги {lid}: {e}")
-            _RANKS[key] = {}
-    return _RANKS[key]
+            for r in rows:
+                if r.get("intRank"):
+                    res["ids"][str(r.get("idTeam"))] = int(r["intRank"])
+                    res["names"][norm_team(r.get("strTeam"))] = int(r["intRank"])
+    except Exception as e:
+        print(f"::warning::таблица лиги {league}: {e}")
+    _RANKS[key] = res
+    return res
+
+
+def rank_of(ranks, team_id, name):
+    """Место команды: сначала по номеру TheSportsDB, потом по названию (в разных источниках оно пишется чуть по-разному)."""
+    if not ranks:
+        return None
+    if team_id and str(team_id) in ranks["ids"]:
+        return ranks["ids"][str(team_id)]
+    n = norm_team(name)
+    if not n:
+        return None
+    if n in ranks["names"]:
+        return ranks["names"][n]
+    for k2, pos in ranks["names"].items():
+        if k2 and (k2 in n or n in k2) and min(len(k2), len(n)) >= 5:
+            return pos
+    return None
 
 
 def team_match(card, tz):
@@ -139,10 +182,11 @@ def team_match(card, tz):
     match = {
         "own": {"name": ev.get(f"str{own_side}Team") or team.get("strTeam") or name,
                 "badge": ev.get(f"str{own_side}TeamBadge") or badge_of(team),
-                "rank": ranks.get(str(team["idTeam"]))},
+                "rank": rank_of(ranks, ev.get(f"id{own_side}Team") or team["idTeam"],
+                                ev.get(f"str{own_side}Team") or team.get("strTeam") or name)},
         "opp": {"name": ev.get(f"str{opp_side}Team") or "?",
                 "badge": ev.get(f"str{opp_side}TeamBadge") or (team_badge(opp_id) if opp_id else None),
-                "rank": ranks.get(str(opp_id)) if opp_id else None},
+                "rank": rank_of(ranks, opp_id, ev.get(f"str{opp_side}Team"))},
         "home": own_home, "when": when_txt, "where": where or None,
     }
     return lines, match
@@ -528,16 +572,18 @@ def weather(card, tz):
     url = (f"https://api.open-meteo.com/v1/forecast?latitude={card['lat']}&longitude={card['lon']}"
            "&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m"
            "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code"
-           f"&timezone={quote(tz.key)}&forecast_days=3&wind_speed_unit=ms")
+           f"&timezone={quote(tz.key)}&forecast_days={int(card.get('days', 10))}&wind_speed_unit=ms")
     w = http_json(url)
     c, d = w["current"], w["daily"]
     lines = [f"Сейчас: {signed(c['temperature_2m'])}°, ощущается {signed(c['apparent_temperature'])}°, "
              f"{WMO.get(c['weather_code'], '—')}, ветер {round(c['wind_speed_10m'])} м/с"]
     names = ["Сегодня", "Завтра", "Послезавтра"]
-    for i in range(len(d["time"])):
+    for i in range(min(3, len(d["time"]))):
         lines.append(f"{names[i]}: {signed(d['temperature_2m_min'][i])}…{signed(d['temperature_2m_max'][i])}°, "
                      f"{WMO.get(d['weather_code'][i], '—')}, {d['precipitation_probability_max'][i]}%")
-    return lines
+    pts = [{"d": d["time"][i], "hi": d["temperature_2m_max"][i], "lo": d["temperature_2m_min"][i]}
+           for i in range(len(d["time"]))]
+    return {"lines": lines, "charts": {"weather": {"kind": "range", "title": f"Прогноз · {len(pts)} дн.", "points": pts}}}
 
 
 # ---------- источник: ЦБ РФ и CoinGecko (котировки, ключи не нужны) ----------
