@@ -303,7 +303,7 @@ def steam_upcoming(card, tz):
             break
     if not games:
         return ["В списке «Популярные ожидаемые» нет игр с точной датой до конца года."]
-    lines = [f"Топ-{n} ожидаемых PC-новинок до {end.day} {MONTHS[end.month - 1]}", ""]
+    lines = [f"Топ-{n} ожидаемых PC-новинок до {end.day} {MONTHS[end.month - 1]}"]
     for i, (name, d) in enumerate(games[:n], 1):
         lines.append(f"{i}. {name} — {d.day} {MONTHS[d.month - 1]}")
     lines += ["", "данные: Steam, «Популярные ожидаемые»"]

@@ -38,7 +38,7 @@ h1 {
   text-shadow: 0 0 18px #f2c14e33;
 }
 .right { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
-h1 #today { color: var(--gold-soft); text-transform: none; letter-spacing: .06em; margin-left: .35em; }
+h1 #today { color: var(--gold-soft); text-transform: none; letter-spacing: .06em; font-size: 1.15em; }
 button {
   cursor: pointer; padding: 5px 14px; border-radius: 999px;
   color: var(--gold); background: #f2c14e12; border: 1px solid #f2c14e66;
@@ -66,7 +66,9 @@ h2, h3 {
   font: 700 clamp(.9rem, .95vw, 1.2rem) Georgia, "Times New Roman", serif;
   letter-spacing: .12em; text-transform: uppercase;
 }
-h2 .ico { height: 1.6em; width: 1.6em; margin: -.4em 0 -.4em .8em; vertical-align: middle; }
+h2.has-ico { display: flex; align-items: center; }
+h2.has-ico .t { text-box: trim-both cap alphabetic; }
+h2 .ico { flex: none; height: 1.6em; width: 1.6em; margin-left: .8em; }
 h3 { font-size: clamp(.78rem, .8vw, 1rem); color: var(--gold-soft); margin-bottom: 6px; }
 .body {
   flex: 1; min-height: 0; overflow: auto;
@@ -184,12 +186,15 @@ function render(data) {
   for (const c of data.cards) {
     const card = el("section", "card");
     card.dataset.id = c.id;
-    const h2 = el("h2", "", c.title);
+    const h2 = el("h2");
     if (ICONS[c.id]) {
       const img = el("img", "ico");
       img.src = ICONS[c.id];
       img.alt = "";
-      h2.append(img);
+      h2.className = "has-ico";
+      h2.append(el("span", "t", c.title), img);
+    } else {
+      h2.textContent = c.title;
     }
     card.append(h2);
     const body = el("div", c.sections ? "subs" : "body");
