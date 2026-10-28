@@ -54,28 +54,35 @@
           ]
         },
         {
-          "id": "ucl-table",
+          "id": "ucl",
           "title": "Лига чемпионов",
-          "type": "fd_table",
-          "comp": "CL",
-          "cutoffs": [
-            [
-              8,
-              "1–8: сразу в 1/8 финала"
-            ],
-            [
-              24,
-              "9–24: плей-офф; ниже: вылет"
-            ]
+          "type": "group",
+          "sections": [
+            {
+              "id": "ucl-next",
+              "title": "Календарь",
+              "type": "fd_next",
+              "comp": "CL",
+              "days": 30,
+              "first_day_only": true
+            },
+            {
+              "id": "ucl-table",
+              "title": "Положение",
+              "type": "fd_table",
+              "comp": "CL",
+              "cutoffs": [
+                [
+                  8,
+                  "1–8: сразу в 1/8 финала"
+                ],
+                [
+                  24,
+                  "9–24: плей-офф; ниже: вылет"
+                ]
+              ]
+            }
           ]
-        },
-        {
-          "id": "ucl-next",
-          "title": "Календарь ЛЧ",
-          "type": "fd_next",
-          "comp": "CL",
-          "days": 30,
-          "first_day_only": true
         }
       ]
     },

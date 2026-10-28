@@ -662,7 +662,8 @@ def run_section(sec, tz, prev):
 def run_group(card, tz, prev_card, now_iso):
     """Карточка с подблоками и одной общей пометкой «обновлено»."""
     prev_secs = {s["id"]: s for s in (prev_card or {}).get("sections", [])}
-    secs = [run_section(s, tz, prev_secs.get(s["id"]))
+    secs = [run_group(s, tz, prev_secs.get(s["id"]), now_iso) if s.get("type") == "group"
+            else run_section(s, tz, prev_secs.get(s["id"]))
             for s in card["sections"] if s.get("enabled", True) is not False]
     any_ok = any(s["ok"] for s in secs)
     return {"id": card["id"], "title": card["title"], "ok": all(s["ok"] for s in secs),
