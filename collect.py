@@ -550,6 +550,37 @@ def pct(p):
     return f"{p:+.1f}".replace(".", ",") + "%"
 
 
+CBR_IDS = {"USD": "R01235", "EUR": "R01239"}
+
+
+def cbr_history(code, days, tz):
+    """Официальный курс ЦБ за последние дни: [{d: 'ГГГГ-ММ-ДД', v: число}], только рабочие дни."""
+    import xml.etree.ElementTree as ET
+    end = datetime.now(tz).date() + timedelta(days=1)
+    start = end - timedelta(days=days + 1)
+    url = ("https://www.cbr.ru/scripts/XML_dynamic.asp?date_req1=" + start.strftime("%d/%m/%Y") +
+           "&date_req2=" + end.strftime("%d/%m/%Y") + "&VAL_NM_RQ=" + CBR_IDS[code])
+    with urlopen(Request(url, headers={"User-Agent": "Mozilla/5.0 (dashboard-collector)"}), timeout=30) as r:
+        root = ET.fromstring(r.read())
+    out = []
+    for rec in root.iter("Record"):
+        d = datetime.strptime(rec.get("Date"), "%d.%m.%Y").date()
+        v = float(rec.find("Value").text.replace(",", ".")) / int(rec.find("Nominal").text)
+        if d <= datetime.now(tz).date():  # завтрашний курс ЦБ публикует заранее, на графике он ни к чему
+            out.append({"d": d.isoformat(), "v": round(v, 4)})
+    return sorted(out, key=lambda x: x["d"])
+
+
+def btc_history(days, tz):
+    """BTC/RUR по дням (последняя цена за сутки) из CoinGecko."""
+    j = http_json(f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=rub&days={days + 1}")
+    by_day = {}
+    for ts, price in j.get("prices") or []:
+        d = datetime.fromtimestamp(ts / 1000, tz).date()
+        by_day[d] = price
+    return [{"d": d.isoformat(), "v": round(v)} for d, v in sorted(by_day.items())][-(days + 1):]
+
+
 def quotes(card, tz):
     """Курсы ЦБ к рублю (с изменением к прошлому курсу) и BTC/RUR."""
     cbr = http_json("https://www.cbr-xml-daily.ru/daily_json.js")
@@ -565,6 +596,19 @@ def quotes(card, tz):
     except Exception as e:
         print(f"::warning::quotes BTC: {e}")
         lines.append("BTC/RUR — нет данных")
+    ch = card.get("chart")
+    if ch:  # графики за неделю по каждой котировке; сбой одного графика остальное не ломает
+        days = int(ch.get("days", 7))
+        charts = {}
+        for code in ch.get("codes", ["USD", "EUR", "BTC"]):
+            try:
+                pts = btc_history(days, tz) if code == "BTC" else cbr_history(code, days, tz)
+                if len(pts) >= 2:
+                    charts[code] = {"title": f"{code}/RUR · {days} дн.", "points": pts}
+            except Exception as e:
+                print(f"::warning::quotes chart {code}: {e}")
+        if charts:
+            return {"lines": lines, "charts": charts}
     return lines
 
 
@@ -672,7 +716,7 @@ def run_section(sec, tz, prev):
             raise RuntimeError(f"неизвестный тип блока: {sec.get('type')}")
         res = fn(sec, tz)
         if isinstance(res, dict):
-            out.update(ok=True, lines=res["lines"], matches=res.get("matches"))
+            out.update(ok=True, lines=res["lines"], matches=res.get("matches"), charts=res.get("charts"))
         else:
             out.update(ok=True, lines=res)
         out["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -682,6 +726,8 @@ def run_section(sec, tz, prev):
         out.update(ok=False, error=str(e), lines=(prev or {}).get("lines") or [])
         if (prev or {}).get("matches"):
             out["matches"] = prev["matches"]
+        if (prev or {}).get("charts"):
+            out["charts"] = prev["charts"]
     return out
 
 

@@ -8,7 +8,15 @@
       "fiat": [
         "USD",
         "EUR"
-      ]
+      ],
+      "chart": {
+        "days": 7,
+        "codes": [
+          "USD",
+          "EUR",
+          "BTC"
+        ]
+      }
     },
     {
       "id": "tasks",
