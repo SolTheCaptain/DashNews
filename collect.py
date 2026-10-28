@@ -84,6 +84,24 @@ FD_LEAGUES = {"english premier league": "PL", "spanish la liga": "PD", "italian 
               "portuguese primeira liga": "PPL", "english league championship": "ELC"}
 
 
+# чемпионаты, которых нет у football-data.org на бесплатном ключе: таблицу берём у ESPN
+ESPN_LEAGUES = {"russian premier league": "rus.1"}
+
+
+def espn_ranks(slug):
+    j = http_json(f"https://site.api.espn.com/apis/v2/sports/soccer/{slug}/standings")
+    out = {}
+    for ch in j.get("children") or [j]:
+        entries = (ch.get("standings") or {}).get("entries") or []
+        for i, e in enumerate(entries, 1):
+            st = {x.get("name"): x.get("value") for x in e.get("stats") or []}
+            pos = int(st["rank"]) if st.get("rank") else i
+            for nm in (e["team"].get("displayName"), e["team"].get("shortDisplayName"), e["team"].get("name")):
+                if nm:
+                    out[norm_team(nm)] = pos
+    return out
+
+
 def norm_team(s):
     import unicodedata
     s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower().replace("&", "and")
@@ -110,6 +128,8 @@ def league_ranks(ev):
                 for nm in (r["team"].get("name"), r["team"].get("shortName")):
                     if nm:
                         res["names"][norm_team(nm)] = r["position"]
+        if not res["names"] and league.lower() in ESPN_LEAGUES:
+            res["names"] = espn_ranks(ESPN_LEAGUES[league.lower()])
         if not res["names"] and season:
             rows = http_json(f"{TSDB}/lookuptable.php?l={lid}&s={season}").get("table") or []
             for r in rows:
@@ -137,6 +157,55 @@ def rank_of(ranks, team_id, name):
         if k2 and (k2 in n or n in k2) and min(len(k2), len(n)) >= 5:
             return pos
     return None
+
+
+def round_block(rc, tz, skip_ids):
+    """Все матчи ближайшего тура чемпионата (можно исключить команды через skip_ids), места команд в скобках."""
+    lid = str(rc["league_id"])
+    evs = http_json(f"{TSDB}/eventsnextleague.php?id={lid}").get("events") or []
+    evs = [e for e in evs if e.get("intRound")]
+    if not evs:
+        return None
+    rnd = int(evs[0]["intRound"])
+    season, league = evs[0].get("strSeason"), evs[0].get("strLeague") or rc.get("league", "")
+    byid = {e["idEvent"]: e for e in evs if int(e["intRound"]) == rnd}
+    try:  # полный список тура (в «ближайших» может быть неполно)
+        for e in http_json(f"{TSDB}/eventsround.php?id={lid}&r={rnd}&s={season}").get("events") or []:
+            byid.setdefault(e["idEvent"], e)
+    except Exception as e:
+        print(f"::warning::тур {rnd}: {e}")
+
+    def when(e):
+        if e.get("strTimestamp"):
+            return parse_utc(e["strTimestamp"])
+        if e.get("dateEvent"):
+            return parse_utc(e["dateEvent"] + "T" + (e.get("strTime") or "00:00:00"))
+        return None
+
+    ranks = league_ranks({"idLeague": lid, "strSeason": season, "strLeague": league})
+    items = []
+    for e in byid.values():
+        if str(e.get("idHomeTeam")) in skip_ids or str(e.get("idAwayTeam")) in skip_ids:
+            continue
+        w = when(e)
+        if w:
+            items.append((w, e))
+    items.sort(key=lambda x: x[0])
+    lines, cur = [], ""
+
+    def nm(e, side):
+        n = e.get(f"str{side}Team") or "?"
+        r = rank_of(ranks, e.get(f"id{side}Team"), n)
+        return f"{n} ({r})" if r else n
+
+    for w, e in items:
+        loc = w.astimezone(tz)
+        dl = day_label(loc)
+        if dl != cur:
+            cur = dl
+            lines += ([""] if lines else []) + [dl.upper()]
+        lines.append(f"  {loc:%H:%M}  {nm(e, 'Home')} — {nm(e, 'Away')}")
+    return {"title": f"Тур {rnd}", "lines": lines} if lines else None
 
 
 def team_match(card, tz):
@@ -189,6 +258,13 @@ def team_match(card, tz):
                 "rank": rank_of(ranks, opp_id, ev.get(f"str{opp_side}Team"))},
         "home": own_home, "when": when_txt, "where": where or None,
     }
+    if card.get("round"):
+        try:
+            rb = round_block(card["round"], tz, set())
+            if rb:
+                match["round"] = rb
+        except Exception as e:
+            print(f"::warning::тур чемпионата {name}: {e}")
     return lines, match
 
 
@@ -205,7 +281,7 @@ def teams_next(card, tz):
             lines.append("")
         lines.append(label)
         try:
-            tl, m = team_match({"team": t["name"], "country": t.get("country"), "team_id": t.get("id")}, tz)
+            tl, m = team_match({"team": t["name"], "country": t.get("country"), "team_id": t.get("id"), "round": t.get("round")}, tz)
             lines += ["  " + x for x in tl]
             if m:
                 m["label"] = label
@@ -422,9 +498,10 @@ def steam_upcoming(card, tz):
 # ---------- источник: Scryfall (сеты Magic, ключ не нужен) ----------
 
 def mtg_roadmap(card, tz):
-    """Основные бумажные сеты Magic от сегодня до конца года; без даты — TBA."""
+    """Основные бумажные сеты Magic от сегодня: до конца года или `count` ближайших; без даты — TBA."""
     today = datetime.now(tz).date()
-    end = date(today.year, 12, 31)
+    count = card.get("count")
+    end = date(today.year + 1, 12, 31) if count else date(today.year, 12, 31)
     types = set(card.get("types", ["core", "expansion"]))
     j = http_json("https://api.scryfall.com/sets", {
         "User-Agent": "DashNews/1.0 (github.com/SolTheCaptain/DashNews)",
@@ -444,7 +521,7 @@ def mtg_roadmap(card, tz):
         return [f"До конца {end.year} года новых сетов в источнике нет."]
     lines = [f"{d.day} {MONTHS[d.month - 1]} — {name}" for d, name in dated]
     lines += [f"TBA — {name}" for name in tba]
-    return lines
+    return lines[:count] if count else lines
 
 
 # ---------- источник: Wizards (баны), имена карт сверяем со Scryfall ----------
@@ -492,7 +569,7 @@ def mtg_bans(card, tz):
     today = datetime.now(tz).date()
     man = card.get("manual")
     if man:  # ручной запасной вариант из config.json
-        return [man["date"]] + list(man.get("cards", [])) + (["Следующая: " + man["next"]] if man.get("next") else [])
+        return (["Следующие: " + man["next"]] if man.get("next") else []) + ["Прошлые: " + man["date"]] + list(man.get("cards", []))
     d, html = br_find_latest(today)
     if not d:
         raise RuntimeError("страница анонса не найдена")
@@ -535,7 +612,7 @@ def mtg_bans(card, tz):
                         found.append((fmt, cand))
                     break
             i += hit or 1
-    lines = [f"{d.day} {MONTHS[d.month - 1]} {d.year}"]
+    lines = [f"Прошлые: {d.day} {MONTHS[d.month - 1]} {d.year}"]
     groups = {}
     for f, n in found:  # карты по форматам: «Формат:» и под ним карты
         groups.setdefault(f, []).append(n)
@@ -546,7 +623,7 @@ def mtg_bans(card, tz):
     m = re.search(r"(?is)next.{0,80}?([A-Z][a-z]+) (\d{1,2}), (\d{4})", " ".join(br_text_lines(html)))
     if m and m.group(1).lower() in MONTHS_EN:
         nd = date(int(m.group(3)), MONTHS_EN.index(m.group(1).lower()) + 1, int(m.group(2)))
-        lines += [f"Следующая: {nd.day} {MONTHS[nd.month - 1]} {nd.year}"]
+        lines.insert(0, f"Следующие: {nd.day} {MONTHS[nd.month - 1]} {nd.year}")
     return lines
 
 

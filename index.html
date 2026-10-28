@@ -88,8 +88,7 @@ h2.has-ico { display: flex; align-items: center; }
 h2.has-ico .t { text-box: trim-both cap alphabetic; }
 .card[data-id="today"] h2 { color: var(--today); }
 h2 .big { font-size: 1.15em; }
-h2 .dt { font-size: .96em; }
-h2 .dt .num { font-size: 1.28em; font-family: "Times New Roman", Times, "Liberation Serif", serif; font-variant-numeric: lining-nums; }
+h2 .dt { font-size: 1.2em; font-family: "Times New Roman", Times, "Liberation Serif", serif; font-variant-numeric: lining-nums; }
 .card[data-id="today"] h2 .t { position: relative; top: .18em; }
 .card[data-id="today"] h2 .ico { height: 2.2em; width: 2.2em; margin-top: -.3em; margin-bottom: -.3em; }
 .card[data-id="quotes"] .body, .card[data-id="weather"] .body { display: flex; flex-direction: column; }
@@ -175,6 +174,12 @@ pre .down { color: var(--down); }
 .match .vs .n { color: var(--text); font-weight: 700; text-transform: uppercase; }
 .match .when { color: var(--text); }
 .match .where { color: var(--muted); }
+.match details.rnd { margin-top: 6px; }
+.match details.rnd summary { cursor: pointer; color: var(--gold-soft); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; list-style: none; }
+.match details.rnd summary::-webkit-details-marker { display: none; }
+.match details.rnd summary::before { content: "▸ "; }
+.match details.rnd[open] summary::before { content: "▾ "; }
+.match details.rnd pre { margin-top: 4px; white-space: pre; }
 .match .lbl { color: var(--gold-soft); font-weight: 700; text-transform: uppercase; }
 .sub[data-id="ucl-table"] pre { white-space: pre; }
 
@@ -324,6 +329,12 @@ function matchesEl(matches) {
     item.append(vs);
     if (m.when) { const w = el("div", "when"); w.append(...dateNodes(m.when)); item.append(w); }
     if (m.where) item.append(el("div", "where", m.where));
+    if (m.round && m.round.lines && m.round.lines.length) {
+      const dt = el("details", "rnd");
+      dt.append(el("summary", "", m.round.title.toUpperCase()));
+      const pre = el("pre"); fillPre(pre, m.round.lines); dt.append(pre);
+      item.append(dt);
+    }
     box.append(item);
   }
   return box;
@@ -525,7 +536,7 @@ function render(data) {
     const tt = el("span", "t");
     tt.append(el("span", "big", "Сегодня "));
     const dt = el("span", "dt");
-    today.textContent.split(/(\d+)/).forEach(part => dt.append(/^\d+$/.test(part) ? el("span", "num", part) : part));
+    dt.append(new Date().toLocaleDateString("ru-RU", {day: "2-digit", month: "2-digit", year: "2-digit"}));
     tt.append(dt);
     h.append(tt, im);
     const tb = el("div", "todaybody");
