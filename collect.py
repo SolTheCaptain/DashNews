@@ -336,7 +336,6 @@ def mtg_roadmap(card, tz):
     lines = [f"Сеты до конца {end.year} года", ""]
     lines += [f"{d.day} {MONTHS[d.month - 1]} — {name}" for d, name in dated]
     lines += [f"TBA — {name}" for name in tba]
-    lines += ["", "данные: Scryfall"]
     return lines
 
 
