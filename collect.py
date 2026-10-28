@@ -382,6 +382,7 @@ def mtg_roadmap(card, tz):
 MONTHS_EN = ["january", "february", "march", "april", "may", "june", "july",
              "august", "september", "october", "november", "december"]
 BR_URL = "https://magic.wizards.com/en/news/announcements/banned-and-restricted-{m}-{d}-{y}"
+BR_FORMATS = r"Competitive Brawl|Standard|Pioneer|Modern|Legacy|Vintage|Pauper|Alchemy|Historic|Timeless|Brawl"
 BR_SKIP = {"Standard", "Pioneer", "Modern", "Legacy", "Vintage", "Pauper", "Alchemy", "Historic",
            "Timeless", "Brawl", "Commander", "Explorer", "Arena", "Eternal", "Weekend", "Magic",
            "Wizards", "Banned", "Restricted", "Unbanned", "Changes", "Announcement", "Competitive"}
@@ -421,7 +422,7 @@ def mtg_bans(card, tz):
     today = datetime.now(tz).date()
     man = card.get("manual")
     if man:  # ручной запасной вариант из config.json
-        return [man["date"], ""] + list(man.get("cards", [])) + (["", "Следующая: " + man["next"]] if man.get("next") else [])
+        return [man["date"]] + list(man.get("cards", [])) + (["Следующая: " + man["next"]] if man.get("next") else [])
     d, html = br_find_latest(today)
     if not d:
         raise RuntimeError("страница анонса не найдена")
@@ -429,13 +430,20 @@ def mtg_bans(card, tz):
                       {"User-Agent": "DashNews/1.0 (github.com/SolTheCaptain/DashNews)",
                        "Accept": "application/json;q=0.9,*/*;q=0.8"}).get("data") or []
     known = {n.split(" // ")[0] for n in names}
-    found = []
+    sets = http_json("https://api.scryfall.com/sets", {"User-Agent": "DashNews/1.0 (github.com/SolTheCaptain/DashNews)",
+                                                       "Accept": "application/json;q=0.9,*/*;q=0.8"})
+    set_names = " | ".join(x["name"].lower() for x in sets.get("data") or [])
+    found, seen = [], set()
+    fmt = ""
     active = 0
     for line in br_text_lines(html):
         kw = re.search(r"(?i)\b(un)?ban|restrict", line)
         if len(line) >= 200:
             active = 0
             continue
+        fm = re.search(BR_FORMATS, line)
+        if fm:
+            fmt = fm.group(0)
         if kw:
             active = 20
         elif active and len(line) < 90:
@@ -449,18 +457,26 @@ def mtg_bans(card, tz):
             hit = 0
             for n in range(min(9, len(w) - i), 0, -1):
                 cand = " ".join(w[i:i + n]).strip(".;:()\"“”")
-                if cand in known and cand not in BR_SKIP and (n > 1 or len(cand) >= 6):
+                if cand in known and cand not in BR_SKIP and (n > 1 or len(cand) >= 6) \
+                        and cand.lower() not in set_names:  # названия сетов бывают и названиями карт
                     hit = n
-                    if cand not in found:
-                        found.append(cand)
+                    if (cand, fmt) not in seen:
+                        seen.add((cand, fmt))
+                        found.append((fmt, cand))
                     break
             i += hit or 1
-    lines = [f"{d.day} {MONTHS[d.month - 1]} {d.year}", ""]
-    lines += found or ["(список карт не распознан)"]
+    lines = [f"{d.day} {MONTHS[d.month - 1]} {d.year}"]
+    groups = {}
+    for f, n in found:  # карты по форматам: «Формат:» и под ним карты
+        groups.setdefault(f, []).append(n)
+    for f, ns in groups.items():
+        lines += ([f + ":"] if f else []) + ["  " + n if f else n for n in ns]
+    if not found:
+        lines.append("(список карт не распознан)")
     m = re.search(r"(?is)next.{0,80}?([A-Z][a-z]+) (\d{1,2}), (\d{4})", " ".join(br_text_lines(html)))
     if m and m.group(1).lower() in MONTHS_EN:
         nd = date(int(m.group(3)), MONTHS_EN.index(m.group(1).lower()) + 1, int(m.group(2)))
-        lines += ["", f"Следующая: {nd.day} {MONTHS[nd.month - 1]} {nd.year}"]
+        lines += [f"Следующая: {nd.day} {MONTHS[nd.month - 1]} {nd.year}"]
     return lines
 
 
