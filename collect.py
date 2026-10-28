@@ -63,7 +63,21 @@ def table_lines(rows, cutoffs):
 
 # ---------- источник: TheSportsDB (ближайший матч команды) ----------
 
-def team_next(card, tz):
+def badge_of(t):
+    return (t or {}).get("strBadge") or (t or {}).get("strTeamBadge") or None
+
+
+def team_badge(team_id):
+    try:
+        t = (http_json(f"{TSDB}/lookupteam.php?id={team_id}").get("teams") or [None])[0]
+        return badge_of(t)
+    except Exception as e:
+        print(f"::warning::эмблема команды {team_id}: {e}")
+        return None
+
+
+def team_match(card, tz):
+    """Ближайший матч команды: (строки текстом, словарь для карточки с эмблемами)."""
     name, country = card["team"], card.get("country")
     found = http_json(f"{TSDB}/searchteams.php?t={quote(name)}")
     teams = [t for t in (found.get("teams") or []) if t.get("strSport") == "Soccer"]
@@ -73,7 +87,7 @@ def team_next(card, tz):
         raise RuntimeError(f"команда не найдена: {name}")
     events = http_json(f"{TSDB}/eventsnext.php?id={team['idTeam']}").get("events") or []
     if not events:
-        return ["Ближайших матчей в источнике нет."]
+        return ["Ближайших матчей в источнике нет."], None
 
     def when(e):
         if e.get("strTimestamp"):
@@ -86,32 +100,58 @@ def team_next(card, tz):
     ev = events[0]
     w = when(ev)
     lines = [ev.get("strEvent") or name]
+    when_txt = None
     if w:
         loc = w.astimezone(tz)
-        lines.append(f"{day_label(loc)}, {loc:%H:%M} ({tz.key})")
+        when_txt = f"{day_label(loc)}, {loc:%H:%M}"
+        lines.append(when_txt)
     where = ", ".join(x for x in (ev.get("strLeague"), ev.get("strVenue")) if x)
     if where:
         lines.append(where)
-    return lines
+
+    own_home = str(ev.get("idHomeTeam")) == str(team["idTeam"])
+    own_side, opp_side = ("Home", "Away") if own_home else ("Away", "Home")
+    opp_id = ev.get(f"id{opp_side}Team")
+    match = {
+        "own": {"name": ev.get(f"str{own_side}Team") or team.get("strTeam") or name,
+                "badge": ev.get(f"str{own_side}TeamBadge") or badge_of(team)},
+        "opp": {"name": ev.get(f"str{opp_side}Team") or "?",
+                "badge": ev.get(f"str{opp_side}TeamBadge") or (team_badge(opp_id) if opp_id else None)},
+        "home": own_home, "when": when_txt, "where": where or None,
+    }
+    return lines, match
+
+
+def team_next(card, tz):
+    return team_match(card, tz)[0]
 
 
 def teams_next(card, tz):
-    """Несколько команд подряд: ближайший матч каждой."""
-    lines, fails = [], 0
+    """Несколько команд подряд: ближайший матч каждой (текстом и структурой для эмблем)."""
+    lines, matches, fails = [], [], 0
     for t in card["teams"]:
         label = t.get("label") or t["name"]
         if lines:
             lines.append("")
         lines.append(label)
         try:
-            lines += ["  " + x for x in team_next({"team": t["name"], "country": t.get("country")}, tz)]
+            tl, m = team_match({"team": t["name"], "country": t.get("country")}, tz)
+            lines += ["  " + x for x in tl]
+            if m:
+                m["label"] = label
+                if t.get("emblem"):
+                    m["emblem"] = t["emblem"]
+                matches.append(m)
+            else:
+                matches.append({"label": label, "error": tl[0]})
         except Exception as e:
             fails += 1
             print(f"::warning::{label}: {e}")
             lines.append(f"  не удалось получить данные ({e})")
+            matches.append({"label": label, "error": f"не удалось получить данные ({e})"})
     if fails == len(card["teams"]):
         raise RuntimeError("не удалось получить данные ни по одной команде")
-    return lines
+    return {"lines": lines, "matches": matches}
 
 
 # ---------- источник: football-data.org (турниры) ----------
@@ -312,16 +352,16 @@ def steam_upcoming(card, tz):
 # ---------- источник: Scryfall (сеты Magic, ключ не нужен) ----------
 
 def mtg_roadmap(card, tz):
-    """Все бумажные сеты Magic от сегодня до конца года; без даты — TBA."""
+    """Основные бумажные сеты Magic от сегодня до конца года; без даты — TBA."""
     today = datetime.now(tz).date()
     end = date(today.year, 12, 31)
-    skip = set(card.get("skip_types", ["token", "memorabilia", "promo", "minigame"]))
+    types = set(card.get("types", ["core", "expansion"]))
     j = http_json("https://api.scryfall.com/sets", {
         "User-Agent": "DashNews/1.0 (github.com/SolTheCaptain/DashNews)",
         "Accept": "application/json;q=0.9,*/*;q=0.8"})
     dated, tba = [], list(card.get("extra", []))
     for s in j.get("data") or []:
-        if s.get("digital") or s.get("set_type") in skip:
+        if s.get("digital") or s.get("set_type") not in types:
             continue
         if not s.get("released_at"):
             tba.append(s["name"])
@@ -332,9 +372,95 @@ def mtg_roadmap(card, tz):
     dated.sort()
     if not dated and not tba:
         return [f"До конца {end.year} года новых сетов в источнике нет."]
-    lines = [f"Сеты до конца {end.year} года", ""]
-    lines += [f"{d.day} {MONTHS[d.month - 1]} — {name}" for d, name in dated]
+    lines = [f"{d.day} {MONTHS[d.month - 1]} — {name}" for d, name in dated]
     lines += [f"TBA — {name}" for name in tba]
+    return lines
+
+
+# ---------- источник: Wizards (баны), имена карт сверяем со Scryfall ----------
+
+MONTHS_EN = ["january", "february", "march", "april", "may", "june", "july",
+             "august", "september", "october", "november", "december"]
+BR_URL = "https://magic.wizards.com/en/news/announcements/banned-and-restricted-{m}-{d}-{y}"
+BR_SKIP = {"Standard", "Pioneer", "Modern", "Legacy", "Vintage", "Pauper", "Alchemy", "Historic",
+           "Timeless", "Brawl", "Commander", "Explorer", "Arena", "Eternal", "Weekend", "Magic",
+           "Wizards", "Banned", "Restricted", "Unbanned", "Changes", "Announcement", "Competitive"}
+
+
+def http_text(url):
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 (dashboard-collector)"})
+    with urlopen(req, timeout=30) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def br_find_latest(today):
+    """Страницы анонсов называются banned-and-restricted-<месяц>-<день>-<год>: перебираем дни назад."""
+    def probe(d):
+        try:
+            return d, http_text(BR_URL.format(m=MONTHS_EN[d.month - 1], d=d.day, y=d.year))
+        except Exception:
+            return d, None
+    for start in range(0, 150, 14):
+        days = [today - timedelta(days=i) for i in range(start, start + 14)]
+        with ThreadPoolExecutor(7) as ex:
+            hits = [(d, h) for d, h in ex.map(probe, days) if h]
+        if hits:
+            return max(hits, key=lambda x: x[0])
+    return None, None
+
+
+def br_text_lines(html):
+    html = re.sub(r"(?is)<(script|style|noscript).*?</\1>", " ", html)
+    html = re.sub(r"(?i)</?(p|div|li|ul|ol|h[1-6]|br|tr|section|article)[^>]*>", "\n", html)
+    html = re.sub(r"<[^>]+>", " ", html)
+    return [re.sub(r"\s+", " ", unescape(l)).strip() for l in html.split("\n") if l.strip()]
+
+
+def mtg_bans(card, tz):
+    """Дата последнего анонса банов, карты из него, дата следующего."""
+    today = datetime.now(tz).date()
+    man = card.get("manual")
+    if man:  # ручной запасной вариант из config.json
+        return [man["date"], ""] + list(man.get("cards", [])) + (["", "Следующая: " + man["next"]] if man.get("next") else [])
+    d, html = br_find_latest(today)
+    if not d:
+        raise RuntimeError("страница анонса не найдена")
+    names = http_json("https://api.scryfall.com/catalog/card-names",
+                      {"User-Agent": "DashNews/1.0 (github.com/SolTheCaptain/DashNews)",
+                       "Accept": "application/json;q=0.9,*/*;q=0.8"}).get("data") or []
+    known = {n.split(" // ")[0] for n in names}
+    found = []
+    active = 0
+    for line in br_text_lines(html):
+        kw = re.search(r"(?i)\b(un)?ban|restrict", line)
+        if len(line) >= 200:
+            active = 0
+            continue
+        if kw:
+            active = 20
+        elif active and len(line) < 90:
+            active -= 1
+        else:
+            active = 0
+            continue
+        w = line.split()
+        i = 0
+        while i < len(w):
+            hit = 0
+            for n in range(min(9, len(w) - i), 0, -1):
+                cand = " ".join(w[i:i + n]).strip(".;:()\"“”")
+                if cand in known and cand not in BR_SKIP and (n > 1 or len(cand) >= 6):
+                    hit = n
+                    if cand not in found:
+                        found.append(cand)
+                    break
+            i += hit or 1
+    lines = [f"{d.day} {MONTHS[d.month - 1]} {d.year}", ""]
+    lines += found or ["(список карт не распознан)"]
+    m = re.search(r"(?is)next.{0,80}?([A-Z][a-z]+) (\d{1,2}), (\d{4})", " ".join(br_text_lines(html)))
+    if m and m.group(1).lower() in MONTHS_EN:
+        nd = date(int(m.group(3)), MONTHS_EN.index(m.group(1).lower()) + 1, int(m.group(2)))
+        lines += ["", f"Следующая: {nd.day} {MONTHS[nd.month - 1]} {nd.year}"]
     return lines
 
 
@@ -463,6 +589,7 @@ HANDLERS = {
     "slam_russians": slam_russians,
     "steam_upcoming": steam_upcoming,
     "mtg_roadmap": mtg_roadmap,
+    "mtg_bans": mtg_bans,
 }
 
 
@@ -488,15 +615,31 @@ def load_previous():
 def run_section(sec, tz, prev):
     """Один блок: возвращает словарь для data.json. Ошибка не роняет остальные."""
     out = {"id": sec["id"], "title": sec["title"]}
+    days = sec.get("refresh_days")
+    if days and prev and prev.get("ok") and prev.get("at"):
+        try:
+            if datetime.now(timezone.utc) - datetime.fromisoformat(prev["at"]) < timedelta(days=days):
+                out.update(ok=True, lines=prev["lines"], at=prev["at"])
+                print(f"cached   {sec['id']}")
+                return out
+        except Exception:
+            pass
     try:
         fn = HANDLERS.get(sec.get("type"))
         if not fn:
             raise RuntimeError(f"неизвестный тип блока: {sec.get('type')}")
-        out.update(ok=True, lines=fn(sec, tz))
+        res = fn(sec, tz)
+        if isinstance(res, dict):
+            out.update(ok=True, lines=res["lines"], matches=res.get("matches"))
+        else:
+            out.update(ok=True, lines=res)
+        out["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         print(f"ok       {sec['id']}")
     except Exception as e:
         print(f"::warning::{sec['id']}: {e}")
         out.update(ok=False, error=str(e), lines=(prev or {}).get("lines") or [])
+        if (prev or {}).get("matches"):
+            out["matches"] = prev["matches"]
     return out
 
 

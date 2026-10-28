@@ -34,18 +34,21 @@
           "type": "teams_next",
           "teams": [
             {
-              "label": "Спартак",
+              "label": "Spartak Moscow",
               "name": "Spartak Moscow",
+              "emblem": "spartak",
               "country": "Russia"
             },
             {
-              "label": "Реал",
+              "label": "Real Madrid",
               "name": "Real Madrid",
+              "emblem": "real",
               "country": "Spain"
             },
             {
-              "label": "Манчестер Юнайтед",
+              "label": "Manchester United",
               "name": "Manchester United",
+              "emblem": "manutd",
               "country": "England"
             }
           ]
@@ -68,7 +71,7 @@
         },
         {
           "id": "ucl-next",
-          "title": "Ближайшие матчи",
+          "title": "Календарь ЛЧ",
           "type": "fd_next",
           "comp": "CL",
           "days": 30,
@@ -100,8 +103,25 @@
     },
     {
       "id": "mtg",
-      "title": "MTG Roadmap",
-      "type": "mtg_roadmap"
+      "title": "MTG",
+      "type": "group",
+      "sections": [
+        {
+          "id": "sets",
+          "title": "Сеты",
+          "type": "mtg_roadmap",
+          "types": [
+            "core",
+            "expansion"
+          ]
+        },
+        {
+          "id": "bans",
+          "title": "Баны",
+          "type": "mtg_bans",
+          "refresh_days": 7
+        }
+      ]
     }
   ]
 }

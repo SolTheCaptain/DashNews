@@ -27,7 +27,8 @@
 | `fd_next` | матчи турнира на N дней вперёд (football-data.org) | `comp`, `days`, `first_day_only` |
 | `slam_russians` | ближайший шлем: невылетевшие игроки из топ-N, родившиеся в нужной стране, и их матч (ESPN) | `slams`, `top`, `born_in` |
 | `steam_upcoming` | топ-N ожидаемых игр до конца года из «Популярных ожидаемых» Steam | `count`, `scan` |
-| `mtg_roadmap` | все бумажные сеты Magic до конца года, без даты — TBA (Scryfall) | `extra` (названия сетов без даты вручную), `skip_types` |
+| `mtg_roadmap` | основные сеты Magic (core, expansion) до конца года, без даты — TBA (Scryfall) | `extra` (названия сетов без даты вручную), `types` (по умолчанию core, expansion) |
+| `mtg_bans` | последний анонс банов Wizards: дата, карты, дата следующего (раз в `refresh_days` дней; запасной вариант — `manual` в config.json) |
 | `quotes` | курсы ЦБ к рублю и BTC/RUR (cbr-xml-daily.ru, CoinGecko) | `fiat` (коды валют ЦБ, по умолчанию USD, EUR) |
 | `sheet_tasks` | задачи из Google Таблицы (Дата, Время, Контакт, Описание); id таблицы в секрете `TASKS_SHEET_ID` | `days` (окно в днях, по умолчанию 10), `gid` (номер листа, по умолчанию 0) |
 
