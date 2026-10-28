@@ -110,8 +110,6 @@ def league_ranks(ev):
                 for nm in (r["team"].get("name"), r["team"].get("shortName")):
                     if nm:
                         res["names"][norm_team(nm)] = r["position"]
-        if not res["names"] and re.search(r"khl|kontinental", league, re.I):
-            res["names"] = khl_ranks()
         if not res["names"] and season:
             rows = http_json(f"{TSDB}/lookuptable.php?l={lid}&s={season}").get("table") or []
             for r in rows:
@@ -122,30 +120,6 @@ def league_ranks(ev):
         print(f"::warning::таблица лиги {league}: {e}")
     _RANKS[key] = res
     return res
-
-
-def khl_ranks():
-    """Таблица КХЛ с en.khl.ru: место в конференции (берём ближайшую по размеру таблицу, где есть команда).
-    Вёрстку сайта проверить из этой среды нельзя, поэтому разбор терпимый, а итог пишется в лог."""
-    html = http_text("https://en.khl.ru/standings/")
-    tables = []
-    for t in re.findall(r"(?is)<table.*?</table>", html):
-        rows = []
-        for tr in re.findall(r"(?is)<tr.*?</tr>", t):
-            cells = [re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", c))).strip()
-                     for c in re.findall(r"(?is)<t[dh][^>]*>(.*?)</t[dh]>", tr)]
-            rank = next((int(c) for c in cells if re.fullmatch(r"\d{1,2}", c)), None)
-            team = next((c for c in cells if re.search(r"[A-Za-z]{3}", c) and not re.fullmatch(r"[\d.:+\- /]+", c)), None)
-            if rank and team:
-                rows.append((rank, team))
-        if len(rows) >= 10:      # таблицы дивизионов (до 8 команд) нам не нужны
-            tables.append(rows)
-    print(f"khl: найдено таблиц {len(tables)}, строк {[len(t) for t in tables]}")
-    out = {}
-    for rows in sorted(tables, key=len, reverse=True):   # сначала общая, потом конференции — они перезапишут
-        for rank, team in rows:
-            out[norm_team(team)] = rank
-    return out
 
 
 def rank_of(ranks, team_id, name):

@@ -87,6 +87,9 @@ h2 .t, h2:not(.has-ico) { text-decoration: underline; text-decoration-thickness:
 h2.has-ico { display: flex; align-items: center; }
 h2.has-ico .t { text-box: trim-both cap alphabetic; }
 .card[data-id="today"] h2 { color: var(--today); }
+h2 .big { font-size: 1.15em; }
+h2 .dt { font-size: .96em; }
+h2 .dt .num { font-size: 1.28em; font-family: "Times New Roman", Times, "Liberation Serif", serif; font-variant-numeric: lining-nums; }
 .card[data-id="today"] h2 .t { position: relative; top: .18em; }
 .card[data-id="today"] h2 .ico { height: 2.2em; width: 2.2em; margin-top: -.3em; margin-bottom: -.3em; }
 .card[data-id="quotes"] .body, .card[data-id="weather"] .body { display: flex; flex-direction: column; }
@@ -158,7 +161,7 @@ pre .down { color: var(--down); }
 }
 .card[data-id="mtg"] .subs { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 3fr) minmax(0, 6fr); }
 .card[data-id="mtg"] pre { font-size: clamp(11px, .64vw, 13.5px); }
-.sub[data-id="next"] h3, .sub[data-id="ucl"] h3 .t, .sub[data-id="ucl-next"] h3, .sub[data-id="ucl-table"] h3 { text-decoration: underline; text-decoration-color: var(--gold); text-decoration-thickness: 1px; text-underline-offset: .28em; }
+.card[data-id="mtg"] .sub h3, .sub[data-id="next"] h3, .sub[data-id="ucl"] h3 .t, .sub[data-id="ucl-next"] h3, .sub[data-id="ucl-table"] h3 { text-decoration: underline; text-decoration-color: var(--gold); text-decoration-thickness: 1px; text-underline-offset: .28em; }
 .sub[data-id="ucl"] { grid-column: 2; grid-row: 1 / span 2; }
 .subs.inner { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, max-content) minmax(0, 1fr); }
 .matches { display: flex; flex-direction: column; gap: 14px; }
@@ -173,7 +176,7 @@ pre .down { color: var(--down); }
 .match .when { color: var(--text); }
 .match .where { color: var(--muted); }
 .match .lbl { color: var(--gold-soft); font-weight: 700; text-transform: uppercase; }
-.sub[data-id="ucl-table"] pre { white-space: pre; font-size: clamp(11px, .64vw, 13.5px); }
+.sub[data-id="ucl-table"] pre { white-space: pre; }
 
 @media (max-width: 999px) {
   html, body { height: auto; }
@@ -519,7 +522,12 @@ function render(data) {
     const h = el("h2");
     h.className = "has-ico";
     const im = el("img", "ico"); im.src = ICONS.today; im.alt = "";
-    h.append(el("span", "t", "Сегодня " + today.textContent), im);
+    const tt = el("span", "t");
+    tt.append(el("span", "big", "Сегодня "));
+    const dt = el("span", "dt");
+    today.textContent.split(/(\d+)/).forEach(part => dt.append(/^\d+$/.test(part) ? el("span", "num", part) : part));
+    tt.append(dt);
+    h.append(tt, im);
     const tb = el("div", "todaybody");
     const groups = collectToday(data.cards);
     if (!groups.length) tb.append(el("div", "tnone", "На сегодня ничего нет."));
