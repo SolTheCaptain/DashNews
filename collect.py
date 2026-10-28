@@ -76,13 +76,36 @@ def team_badge(team_id):
         return None
 
 
+_RANKS = {}
+NOT_LEAGUE = re.compile(r"cup|champions|europa|conference|super|friendl|trophy|shield|copa|play-?off", re.I)
+
+
+def league_ranks(ev):
+    """Места команд в таблице чемпионата: только для лиги, не для кубков и еврокубков. Нет данных — пусто."""
+    lid, season = ev.get("idLeague"), ev.get("strSeason")
+    if not lid or not season or NOT_LEAGUE.search(ev.get("strLeague") or ""):
+        return {}
+    key = (lid, season)
+    if key not in _RANKS:
+        try:
+            rows = http_json(f"{TSDB}/lookuptable.php?l={lid}&s={season}").get("table") or []
+            _RANKS[key] = {str(r["idTeam"]): int(r["intRank"]) for r in rows if r.get("idTeam") and r.get("intRank")}
+        except Exception as e:
+            print(f"::warning::таблица лиги {lid}: {e}")
+            _RANKS[key] = {}
+    return _RANKS[key]
+
+
 def team_match(card, tz):
     """Ближайший матч команды: (строки текстом, словарь для карточки с эмблемами)."""
     name, country = card["team"], card.get("country")
-    found = http_json(f"{TSDB}/searchteams.php?t={quote(name)}")
-    teams = [t for t in (found.get("teams") or []) if t.get("strSport") == "Soccer"]
-    team = next((t for t in teams if not country or t.get("strCountry") == country),
-                teams[0] if teams else None)
+    if card.get("team_id"):  # команда задана номером в TheSportsDB (хоккей и т. п.), поиск по имени не нужен
+        team = {"idTeam": str(card["team_id"]), "strTeam": name}
+    else:
+        found = http_json(f"{TSDB}/searchteams.php?t={quote(name)}")
+        teams = [t for t in (found.get("teams") or []) if t.get("strSport") == "Soccer"]
+        team = next((t for t in teams if not country or t.get("strCountry") == country),
+                    teams[0] if teams else None)
     if not team:
         raise RuntimeError(f"команда не найдена: {name}")
     events = http_json(f"{TSDB}/eventsnext.php?id={team['idTeam']}").get("events") or []
@@ -112,11 +135,14 @@ def team_match(card, tz):
     own_home = str(ev.get("idHomeTeam")) == str(team["idTeam"])
     own_side, opp_side = ("Home", "Away") if own_home else ("Away", "Home")
     opp_id = ev.get(f"id{opp_side}Team")
+    ranks = league_ranks(ev)
     match = {
         "own": {"name": ev.get(f"str{own_side}Team") or team.get("strTeam") or name,
-                "badge": ev.get(f"str{own_side}TeamBadge") or badge_of(team)},
+                "badge": ev.get(f"str{own_side}TeamBadge") or badge_of(team),
+                "rank": ranks.get(str(team["idTeam"]))},
         "opp": {"name": ev.get(f"str{opp_side}Team") or "?",
-                "badge": ev.get(f"str{opp_side}TeamBadge") or (team_badge(opp_id) if opp_id else None)},
+                "badge": ev.get(f"str{opp_side}TeamBadge") or (team_badge(opp_id) if opp_id else None),
+                "rank": ranks.get(str(opp_id)) if opp_id else None},
         "home": own_home, "when": when_txt, "where": where or None,
     }
     return lines, match
@@ -135,7 +161,7 @@ def teams_next(card, tz):
             lines.append("")
         lines.append(label)
         try:
-            tl, m = team_match({"team": t["name"], "country": t.get("country")}, tz)
+            tl, m = team_match({"team": t["name"], "country": t.get("country"), "team_id": t.get("id")}, tz)
             lines += ["  " + x for x in tl]
             if m:
                 m["label"] = label

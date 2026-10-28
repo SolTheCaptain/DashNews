@@ -103,6 +103,19 @@
       ]
     },
     {
+      "id": "hockey",
+      "title": "Хоккей",
+      "type": "teams_next",
+      "teams": [
+        {
+          "label": "Spartak Moscow",
+          "name": "Spartak Moscow",
+          "id": 140900,
+          "emblem": "spartak"
+        }
+      ]
+    },
+    {
       "id": "pcgames",
       "title": "PC Games",
       "type": "steam_upcoming",
