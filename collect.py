@@ -31,11 +31,28 @@ MONTHS = ["января", "февраля", "марта", "апреля", "ма�
 
 # ---------- общие помощники ----------
 
+_LAST_TSDB = [0.0]
+
+
 def http_json(url, headers=None):
+    """Бесплатный ключ TheSportsDB пускает ~30 запросов в минуту: держим паузу между ними и повторяем при 429."""
+    import time
+    from urllib.error import HTTPError
     req = Request(url, headers={"User-Agent": "Mozilla/5.0 (dashboard-collector)", **(headers or {})})
-    with urlopen(req, timeout=30) as r:
-        text = r.read().decode("utf-8")
-    return json.loads(text) if text.strip() else {}
+    for attempt in range(4):
+        if "thesportsdb.com" in url:
+            wait = 2.2 - (time.time() - _LAST_TSDB[0])
+            if wait > 0:
+                time.sleep(wait)
+            _LAST_TSDB[0] = time.time()
+        try:
+            with urlopen(req, timeout=30) as r:
+                text = r.read().decode("utf-8")
+            return json.loads(text) if text.strip() else {}
+        except HTTPError as e:
+            if e.code != 429 or attempt == 3:
+                raise
+            time.sleep(10 * (attempt + 1))
 
 
 def parse_utc(s):
@@ -358,7 +375,6 @@ def fd_next(card, tz):
             lines += ([""] if lines else []) + [dl.upper()]
         h, a = m["homeTeam"], m["awayTeam"]
         lines.append(f"  {loc:%H:%M}  {h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}")
-    lines += ["", f"время по {tz.key}"]
     return lines
 
 
