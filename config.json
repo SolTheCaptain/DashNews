@@ -20,7 +20,7 @@
     },
     {
       "id": "tasks",
-      "title": "Задачи декады",
+      "title": "Задачи",
       "type": "sheet_tasks",
       "days": 10
     },
@@ -160,7 +160,8 @@
           "id": "bans",
           "title": "Баны",
           "type": "mtg_bans",
-          "refresh_days": 7
+          "refresh_days": 7,
+          "rev": 4
         }
       ]
     }

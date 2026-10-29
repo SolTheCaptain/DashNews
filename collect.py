@@ -124,6 +124,7 @@ def norm_team(s):
     s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode().lower().replace("&", "and")
     s = re.sub(r"[^a-z0-9 ]", " ", s)
     s = re.sub(r"\b(fc|cf|afc|sc|ac|as|ssc|rc|club|de|the|calcio|fk)\b", " ", s)
+    s = re.sub(r"\b(moskva|moskow)\b", "moscow", s)
     return re.sub(r"\s+", " ", s).strip()
 
 
@@ -173,6 +174,11 @@ def rank_of(ranks, team_id, name):
     for k2, pos in ranks["names"].items():
         if k2 and (k2 in n or n in k2) and min(len(k2), len(n)) >= 5:
             return pos
+    w = n.split()[0]  # одно и то же первое слово («lokomotiv») только у одной команды таблицы
+    if len(w) >= 6:
+        hits = {pos for k2, pos in ranks["names"].items() if k2.split() and k2.split()[0] == w}
+        if len(hits) == 1:
+            return hits.pop()
     return None
 
 
@@ -505,7 +511,7 @@ def steam_upcoming(card, tz):
             break
     if not games:
         return ["В списке «Популярные ожидаемые» нет игр с точной датой до конца года."]
-    lines = [f"Топ-{n} ожидаемых PC-новинок до {end.day} {MONTHS[end.month - 1]}"]
+    lines = [f"Топ-{n} ожидаемых новинок до {end.day} {MONTHS[end.month - 1]}"]
     for i, (name, d) in enumerate(games[:n], 1):
         lines.append(f"{i}. {name} — {d.day} {MONTHS[d.month - 1]}")
     return lines
@@ -540,15 +546,11 @@ def mtg_roadmap(card, tz):
     return lines[:count] if count else lines
 
 
-# ---------- источник: Wizards (баны), имена карт сверяем со Scryfall ----------
+# ---------- источник: Wizards (дата следующего анонса банов) ----------
 
 MONTHS_EN = ["january", "february", "march", "april", "may", "june", "july",
              "august", "september", "october", "november", "december"]
 BR_URL = "https://magic.wizards.com/en/news/announcements/banned-and-restricted-{m}-{d}-{y}"
-BR_FORMATS = r"Competitive Brawl|Standard|Pioneer|Modern|Legacy|Vintage|Pauper|Alchemy|Historic|Timeless|Brawl"
-BR_SKIP = {"Standard", "Pioneer", "Modern", "Legacy", "Vintage", "Pauper", "Alchemy", "Historic",
-           "Timeless", "Brawl", "Commander", "Explorer", "Arena", "Eternal", "Weekend", "Magic",
-           "Wizards", "Banned", "Restricted", "Unbanned", "Changes", "Announcement", "Competitive"}
 
 
 def http_text(url):
@@ -581,66 +583,18 @@ def br_text_lines(html):
 
 
 def mtg_bans(card, tz):
-    """Дата последнего анонса банов, карты из него, дата следующего."""
-    today = datetime.now(tz).date()
+    """Дата следующего анонса банов: в последнем анонсе Wizards есть фраза «next ... <месяц> <день>, <год>»."""
     man = card.get("manual")
     if man:  # ручной запасной вариант из config.json
-        return (["Следующие: " + man["next"]] if man.get("next") else []) + ["Прошлые: " + man["date"]] + list(man.get("cards", []))
-    d, html = br_find_latest(today)
+        return ["Следующие: " + man["next"]] if man.get("next") else ["Дата следующего анонса пока неизвестна."]
+    d, html = br_find_latest(datetime.now(tz).date())
     if not d:
         raise RuntimeError("страница анонса не найдена")
-    names = http_json("https://api.scryfall.com/catalog/card-names",
-                      {"User-Agent": "DashNews/1.0 (github.com/SolTheCaptain/DashNews)",
-                       "Accept": "application/json;q=0.9,*/*;q=0.8"}).get("data") or []
-    known = {n.split(" // ")[0] for n in names}
-    sets = http_json("https://api.scryfall.com/sets", {"User-Agent": "DashNews/1.0 (github.com/SolTheCaptain/DashNews)",
-                                                       "Accept": "application/json;q=0.9,*/*;q=0.8"})
-    set_names = " | ".join(x["name"].lower() for x in sets.get("data") or [])
-    found, seen = [], set()
-    fmt = ""
-    active = 0
-    for line in br_text_lines(html):
-        kw = re.search(r"(?i)\b(un)?ban|restrict", line)
-        if len(line) >= 200:
-            active = 0
-            continue
-        fm = re.search(BR_FORMATS, line)
-        if fm:
-            fmt = fm.group(0)
-        if kw:
-            active = 20
-        elif active and len(line) < 90:
-            active -= 1
-        else:
-            active = 0
-            continue
-        w = line.split()
-        i = 0
-        while i < len(w):
-            hit = 0
-            for n in range(min(9, len(w) - i), 0, -1):
-                cand = " ".join(w[i:i + n]).strip(".;:()\"“”")
-                if cand in known and cand not in BR_SKIP and (n > 1 or len(cand) >= 6) \
-                        and cand.lower() not in set_names:  # названия сетов бывают и названиями карт
-                    hit = n
-                    if (cand, fmt) not in seen:
-                        seen.add((cand, fmt))
-                        found.append((fmt, cand))
-                    break
-            i += hit or 1
-    lines = [f"Прошлые: {d.day} {MONTHS[d.month - 1]} {d.year}"]
-    groups = {}
-    for f, n in found:  # карты по форматам: «Формат:» и под ним карты
-        groups.setdefault(f, []).append(n)
-    for f, ns in groups.items():
-        lines += ([f + ":"] if f else []) + ["  " + n if f else n for n in ns]
-    if not found:
-        lines.append("(список карт не распознан)")
     m = re.search(r"(?is)next.{0,80}?([A-Z][a-z]+) (\d{1,2}), (\d{4})", " ".join(br_text_lines(html)))
     if m and m.group(1).lower() in MONTHS_EN:
         nd = date(int(m.group(3)), MONTHS_EN.index(m.group(1).lower()) + 1, int(m.group(2)))
-        lines.insert(0, f"Следующие: {nd.day} {MONTHS[nd.month - 1]} {nd.year}")
-    return lines
+        return [f"Следующие: {nd.day} {MONTHS[nd.month - 1]} {nd.year}"]
+    return ["Дата следующего анонса пока неизвестна."]
 
 
 # ---------- источник: Open-Meteo (погода, ключ не нужен) ----------
@@ -711,8 +665,8 @@ def cbr_history(code, days, tz):
 
 
 def btc_history(days, tz):
-    """BTC/RUR по дням (последняя цена за сутки) из CoinGecko."""
-    j = http_json(f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=rub&days={days + 1}")
+    """BTC/USD по дням (последняя цена за сутки) из CoinGecko."""
+    j = http_json(f"https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days={days + 1}")
     by_day = {}
     for ts, price in j.get("prices") or []:
         d = datetime.fromtimestamp(ts / 1000, tz).date()
@@ -721,7 +675,7 @@ def btc_history(days, tz):
 
 
 def quotes(card, tz):
-    """Курсы ЦБ к рублю (с изменением к прошлому курсу) и BTC/RUR."""
+    """Курсы ЦБ к рублю (с изменением к прошлому курсу) и BTC к доллару."""
     cbr = http_json("https://www.cbr-xml-daily.ru/daily_json.js")
     lines = []
     for code in card.get("fiat", ["USD", "EUR"]):
@@ -730,11 +684,11 @@ def quotes(card, tz):
         lines.append(f"{code}/RUR — {num(val)} ({pct((val / prev - 1) * 100)})")
     try:
         btc = http_json("https://api.coingecko.com/api/v3/simple/price"
-                        "?ids=bitcoin&vs_currencies=rub&include_24hr_change=true")["bitcoin"]
-        lines.append(f"BTC/RUR — {num(btc['rub'], 0)} ({pct(btc['rub_24h_change'])})")
+                        "?ids=bitcoin&vs_currencies=usd&include_24hr_change=true")["bitcoin"]
+        lines.append(f"BTC/USD — {num(btc['usd'], 0)} ({pct(btc['usd_24h_change'])})")
     except Exception as e:
         print(f"::warning::quotes BTC: {e}")
-        lines.append("BTC/RUR — нет данных")
+        lines.append("BTC/USD — нет данных")
     ch = card.get("chart")
     if ch:  # графики за неделю по каждой котировке; сбой одного графика остальное не ломает
         days = int(ch.get("days", 7))
@@ -743,7 +697,8 @@ def quotes(card, tz):
             try:
                 pts = btc_history(days, tz) if code == "BTC" else cbr_history(code, days, tz)
                 if len(pts) >= 2:
-                    charts[code] = {"title": f"{code}/RUR · {days} дн.", "points": pts}
+                    charts[code] = {"title": f"{code}/{'USD' if code == 'BTC' else 'RUR'} · {days} дн.", "points": pts,
+                                    "cur": "$" if code == "BTC" else "₽"}
             except Exception as e:
                 print(f"::warning::quotes chart {code}: {e}")
         if charts:
@@ -841,10 +796,10 @@ def run_section(sec, tz, prev):
     """Один блок: возвращает словарь для data.json. Ошибка не роняет остальные."""
     out = {"id": sec["id"], "title": sec["title"]}
     days = sec.get("refresh_days")
-    if days and prev and prev.get("ok") and prev.get("at"):
+    if days and prev and prev.get("ok") and prev.get("at") and prev.get("rev") == sec.get("rev"):
         try:
             if datetime.now(timezone.utc) - datetime.fromisoformat(prev["at"]) < timedelta(days=days):
-                out.update(ok=True, lines=prev["lines"], at=prev["at"])
+                out.update(ok=True, lines=prev["lines"], at=prev["at"], rev=sec.get("rev"))
                 print(f"cached   {sec['id']}")
                 return out
         except Exception:
@@ -859,6 +814,7 @@ def run_section(sec, tz, prev):
         else:
             out.update(ok=True, lines=res)
         out["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        out["rev"] = sec.get("rev")
         print(f"ok       {sec['id']}")
     except Exception as e:
         print(f"::warning::{sec['id']}: {e}")
