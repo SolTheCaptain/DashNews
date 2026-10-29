@@ -102,7 +102,7 @@ FD_LEAGUES = {"english premier league": "PL", "spanish la liga": "PD", "italian 
 
 
 # чемпионаты, которых нет у football-data.org на бесплатном ключе: таблицу берём у ESPN
-ESPN_LEAGUES = {"russian premier league": "rus.1"}
+ESPN_LEAGUES = {"russian premier league": "rus.1", "russian football premier league": "rus.1"}
 
 
 def espn_ranks(slug):
