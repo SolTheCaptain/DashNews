@@ -95,8 +95,7 @@ h2 .dt { font-size: 1.2em; font-family: "Times New Roman", Times, "Liberation Se
 .card[data-id="today"] h2 .ico { height: 2.2em; width: 2.2em; margin-top: -.3em; margin-bottom: -.3em; }
 .card[data-id="quotes"] .body, .card[data-id="weather"] .body { display: flex; flex-direction: column; }
 .card[data-id="quotes"] .body pre, .card[data-id="weather"] .body pre { flex: none; }
-.chart .up { color: var(--up); }
-.chart .down { color: var(--down); }
+.chart .ok { color: var(--up); } .chart .mid { color: var(--warn); } .chart .bad { color: var(--down); }
 .quotes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .rng { margin-left: auto; display: flex; gap: 4px; }
 .rng button { padding: 3px 11px; font-size: 11px; letter-spacing: .02em; text-transform: none; }
@@ -422,7 +421,7 @@ function chartEl(ch) {
   const fv = v => v >= 1000 ? Math.round(v).toLocaleString("ru-RU") : v.toFixed(2).replace(".", ",");
   top.append(el("span", "ct", ch.title || ""),
     el("span", "cv", fv(last.v) + " " + (ch.cur || "₽") + " "),
-    el("span", chg >= 0 ? "up" : "down", (chg >= 0 ? "+" : "−") + Math.abs(chg).toFixed(1).replace(".", ",") + "%"));
+    el("span", deltaZone(Math.abs(chg)), (chg >= 0 ? "+" : "−") + Math.abs(chg).toFixed(1).replace(".", ",") + "%"));
   const box = el("div", "cbox");
   const svg = document.createElementNS(NS, "svg");
   svg.setAttribute("viewBox", "0 0 100 100"); svg.setAttribute("preserveAspectRatio", "none");
@@ -446,8 +445,9 @@ function chartEl(ch) {
 
 // Котировки кнопками: нажатие переключает график под ними; «неделя / сутки» — в заголовке карточки
 let quoteSel = "USD", quoteRange = "day";  // по умолчанию открыты «Сутки»
-// цвет дельты по модулю изменения в %: до первого порога зелёный, до второго жёлтый, дальше красный
-const DELTA_ZONES = { week: [3, 5], day: [0.5, 1] };
+// цвет изменения в % (рамки у пар и процент над графиком) по модулю: до 1% зелёный, до 2% жёлтый, дальше красный
+const DELTA_ZONES = [1, 2];
+const deltaZone = pc => pc <= DELTA_ZONES[0] ? "ok" : pc <= DELTA_ZONES[1] ? "mid" : "bad";
 const RANGES = [["week", "Неделя"], ["day", "Сутки"]];
 function quotesEl(c) {
   const wrap = el("div", "quotes");
@@ -470,9 +470,9 @@ function quotesEl(c) {
       const ch = set(x.dataset.code)[quoteRange], p = ch && ch.points;
       x.className = "qdelta";
       if (!p || p.length < 2) { x.textContent = "—"; return; }
-      const d = (p[p.length - 1].v / p[0].v - 1) * 100, pc = Math.abs(d), [z1, z2] = DELTA_ZONES[quoteRange];
+      const d = (p[p.length - 1].v / p[0].v - 1) * 100, pc = Math.abs(d);
       x.textContent = (d > 0 ? "+" : d < 0 ? "−" : "") + pc.toFixed(2).replace(".", ",") + "%";
-      x.classList.add(pc <= z1 ? "ok" : pc <= z2 ? "mid" : "bad");
+      x.classList.add(deltaZone(pc));
     });
     rng.querySelectorAll("button").forEach(b => {
       b.classList.toggle("on", b.dataset.r === quoteRange);
