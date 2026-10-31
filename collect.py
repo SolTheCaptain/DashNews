@@ -639,10 +639,6 @@ def num(v, nd=2):
     return f"{v:,.{nd}f}".replace(",", "\xa0").replace(".", ",")
 
 
-def pct(p):
-    return f"{p:+.1f}".replace(".", ",") + "%"
-
-
 CBR_IDS = {"USD": "R01235", "EUR": "R01239"}
 
 
@@ -674,11 +670,37 @@ def btc_history(days, tz):
     return [{"d": d.isoformat(), "v": round(v)} for d, v in sorted(by_day.items())][-(days + 1):]
 
 
-YAHOO = {"USD": "RUB=X", "EUR": "EURRUB=X"}
+YAHOO = {"USD": "RUB=X", "EUR": "EURRUB=X", "BTC": "BTC-USD"}
+
+
+def intraday(code, tz, step=15):
+    """Рыночный курс за последние сутки торгов с шагом step минут: [{t: ISO-время, v: число}].
+    USD и EUR — Yahoo Finance, BTC — CoinGecko (запасной вариант — Yahoo)."""
+    raw = []
+    if code == "BTC":
+        try:
+            j = http_json("https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=1")
+            raw = [(datetime.fromtimestamp(ts / 1000, timezone.utc), p) for ts, p in j.get("prices") or []]
+        except Exception as e:
+            print(f"::warning::quotes day BTC (CoinGecko): {e}")
+    if not raw:
+        j = http_json(f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(YAHOO[code])}?range=2d&interval={step}m")
+        r = ((j.get("chart") or {}).get("result") or [{}])[0]
+        closes = (((r.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
+        raw = [(datetime.fromtimestamp(ts, timezone.utc), v) for ts, v in zip(r.get("timestamp") or [], closes) if v]
+    if not raw:
+        return []
+    last = max(t for t, _ in raw)  # в выходные валюта не торгуется: берём последние сутки торгов, а не сутки от «сейчас»
+    buckets = {}  # последняя цена в каждом интервале step минут
+    for t, v in raw:
+        if last - t <= timedelta(hours=24):
+            buckets[int(t.timestamp()) // (step * 60)] = (t, v)
+    nd = 0 if code == "BTC" else 4
+    return [{"t": t.isoformat(timespec="minutes"), "v": round(v, nd)} for _, (t, v) in sorted(buckets.items())]
 
 
 def market_daily(code, days, tz):
-    """Рыночный курс по дням (закрытие дня, сегодня — текущий) из Yahoo Finance: [{d, v}] за последние days+1 дней."""
+    """Рыночный курс по дням (закрытие дня) из Yahoo Finance: [{d, v}] за последние days+1 дней."""
     j = http_json(f"https://query1.finance.yahoo.com/v8/finance/chart/{quote(YAHOO[code])}?range=1mo&interval=1d")
     r = ((j.get("chart") or {}).get("result") or [{}])[0]
     closes = (((r.get("indicators") or {}).get("quote") or [{}])[0]).get("close") or []
@@ -690,44 +712,56 @@ def market_daily(code, days, tz):
 
 
 def quotes(card, tz):
-    """Рыночные курсы USD и EUR к рублю (как в Google, Yahoo Finance) и BTC к доллару (CoinGecko),
-    с изменением к прошлому дню. Если Yahoo не ответил — курс ЦБ."""
+    """Рыночные курсы USD и EUR к рублю и BTC к доллару — как в Google (Yahoo Finance, BTC — CoinGecko).
+    Графики по каждой паре: неделя (закрытие дня) и сутки (каждые 15 минут).
+    Если рыночный источник не ответил: курс ЦБ (BTC — CoinGecko)."""
     ch = card.get("chart") or {}
-    days = int(ch.get("days", 7))
+    days, step = int(ch.get("days", 7)), int(ch.get("step", 15))
     fiat = card.get("fiat", ["USD", "EUR"])
-    hist = {}  # курс по дням: и для строки (последние два дня), и для графика
-    for code in dict.fromkeys(fiat + ch.get("codes", [])):
-        try:
-            pts = btc_history(days, tz) if code == "BTC" else market_daily(code, days, tz)
-        except Exception as e:
-            print(f"::warning::quotes {code}: {e}")
-            pts = []
-        if len(pts) < 2 and code != "BTC":
-            try:  # запасной вариант — курс ЦБ
-                pts = cbr_history(code, days, tz)
+    charts = {}  # сбой одного графика остальное не ломает
+    for code in ch.get("codes", fiat + ["BTC"]):
+        pair, cur = f"{code}/{'USD' if code == 'BTC' else 'RUR'}", "$" if code == "BTC" else "₽"
+        got = {}
+        for rng, fn, title in (
+                ("week", lambda: btc_history(days, tz) if code == "BTC" else market_daily(code, days, tz), f"{days} дн."),
+                ("day", lambda: intraday(code, tz, step), "сутки")):
+            try:
+                pts = fn()
             except Exception as e:
-                print(f"::warning::quotes {code} (ЦБ): {e}")
-        hist[code] = pts
+                print(f"::warning::quotes {rng} {code}: {e}")
+                pts = []
+            if rng == "week" and len(pts) < 2 and code != "BTC":
+                try:  # запасной вариант недели — курс ЦБ
+                    pts = cbr_history(code, days, tz)
+                except Exception as e:
+                    print(f"::warning::quotes week {code} (ЦБ): {e}")
+            if len(pts) >= 2:
+                got[rng] = {"title": f"{pair} · {title}", "points": pts, "cur": cur}
+        if got:
+            charts[code] = got
 
-    def line(code, nd):
-        p = hist.get(code) or []
-        name = f"{code}/{'USD' if code == 'BTC' else 'RUR'}"
-        if len(p) < 2:
-            return f"{name} — нет данных"
-        return f"{name} — {num(p[-1]['v'], nd)} ({pct((p[-1]['v'] / p[-2]['v'] - 1) * 100)})"
+    def now_rate(code):  # текущий курс = последняя точка суточного графика
+        p = (charts.get(code, {}).get("day") or {}).get("points") or []
+        return p[-1]["v"] if p else None
 
-    if "BTC" not in hist:
+    lines, cbr = [], None
+    for code in fiat:
+        v = now_rate(code)
+        if v is None:
+            try:
+                cbr = cbr or http_json("https://www.cbr-xml-daily.ru/daily_json.js")
+                x = cbr["Valute"][code]
+                v = x["Value"] / x["Nominal"]
+            except Exception as e:
+                print(f"::warning::quotes {code}: {e}")
+        lines.append(f"{code}/RUR — {num(v) if v is not None else 'нет данных'}")
+    v = now_rate("BTC")
+    if v is None:
         try:
-            hist["BTC"] = btc_history(days, tz)
+            v = http_json("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd")["bitcoin"]["usd"]
         except Exception as e:
             print(f"::warning::quotes BTC: {e}")
-    lines = [line(code, 2) for code in fiat] + [line("BTC", 0)]
-    charts = {}
-    for code in ch.get("codes", []):
-        pts = hist.get(code) or []
-        if len(pts) >= 2:
-            charts[code] = {"title": f"{code}/{'USD' if code == 'BTC' else 'RUR'} · {days} дн.", "points": pts,
-                            "cur": "$" if code == "BTC" else "₽"}
+    lines.append(f"BTC/USD — {num(v, 0) if v is not None else 'нет данных'}")
     return {"lines": lines, "charts": charts} if charts else lines
 
 

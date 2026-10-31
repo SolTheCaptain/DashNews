@@ -98,13 +98,30 @@ h2 .dt { font-size: 1.2em; font-family: "Times New Roman", Times, "Liberation Se
 .chart .up { color: var(--up); }
 .chart .down { color: var(--down); }
 .quotes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.qlist { display: flex; flex-direction: column; gap: 3px; }
-.qbtn { text-align: left; font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; color: var(--text);
+.rng { margin-left: auto; display: flex; gap: 4px; }
+.rng button { padding: 3px 11px; font-size: 11px; letter-spacing: .02em; text-transform: none; }
+.rng button.on { background: #f2c14e2e; border-color: var(--gold); }
+.rng button:disabled { cursor: default; opacity: .4; }
+.card[data-id="quotes"] .body { display: flex; flex-direction: column; overflow-x: hidden; }
+.quotes { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.qlist { display: grid; grid-template-columns: max-content max-content; justify-content: start; align-items: center; gap: 3px 8px; }
+.qbtn { text-align: left; font: clamp(13.5px, .9vw, 17px)/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; color: var(--text);
   padding: 3px 10px; border-radius: 8px; border: 1px solid transparent; background: transparent; cursor: pointer; }
 .qbtn:hover:not(:disabled) { background: #f2c14e14; }
 .qbtn.on { background: #f2c14e1f; border-color: #f2c14e66; }
 .qbtn:disabled { cursor: default; opacity: .75; }
-.qbtn .up { color: var(--up); } .qbtn .down { color: var(--down); }
+.qdelta { font: clamp(13.5px, .9vw, 17px)/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  padding: 3px 10px; border-radius: 8px; border: 1px solid #f2c14e44; background: #f2c14e0d; text-align: right; color: var(--muted); }
+.qdelta.ok { color: var(--up); } .qdelta.mid { color: var(--warn); } .qdelta.bad { color: var(--down); }
+/* график котировок — как на витрине (погода не затронута) */
+.quotes .chart { min-height: 40px; font: clamp(12.5px, .8vw, 15px) system-ui, sans-serif; }
+.quotes .chart .cbox { min-height: 20px; }
+@media (min-width: 1000px) and (max-height: 760px) {  /* низкий экран (ноутбук): котировки плотнее, как на витрине */
+  .card[data-id="quotes"] h2 { margin-bottom: 6px; }
+  .qbtn, .qdelta { font-size: 12.5px; padding: 1px 9px; }
+  .qlist { gap: 2px 8px; }
+  .quotes .chart { margin-top: 6px; font-size: 12px; }
+}
 .qchart { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .chart { flex: 1; min-height: 70px; display: flex; flex-direction: column; margin-top: 10px; font: 11.5px system-ui, sans-serif; color: var(--muted); }
 .chart .ctop { display: flex; align-items: baseline; gap: 6px; }
@@ -125,7 +142,8 @@ h2 .dt { font-size: 1.2em; font-family: "Times New Roman", Times, "Liberation Se
 .todayfoot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 .todayfoot button { white-space: nowrap; padding: 5px 12px; }
 h2 .ico { flex: none; height: 1.6em; width: 1.6em; margin-left: .8em; }
-.card[data-id="quotes"] h2 { margin-bottom: 18px; }
+.card[data-id="quotes"] h2 { margin-bottom: 10px; }
+.card[data-id="quotes"] h2 .ico { margin-left: .5em; transform: translateY(-.15em); }
 h3.has-ico { display: flex; align-items: center; }
 h3.has-ico .t { text-box: trim-both cap alphabetic; }
 h3 .ico { flex: none; height: calc(1.6 * clamp(.9rem, .95vw, 1.2rem)); width: auto; margin: -.4em 0 -.4em .8em; }
@@ -142,8 +160,6 @@ pre .day, .d { color: var(--gold-soft); font-weight: 700; text-transform: upperc
 h3.has-ico { margin-bottom: 14px; }
 pre .note, pre .th, pre .cut { color: var(--muted); }
 pre .cut { font-size: 11px; }
-pre .up { color: var(--up); }
-pre .down { color: var(--down); }
 
 .foot { flex: none; margin-top: 6px; color: var(--muted); font-size: clamp(11px, .6vw, 13px); }
 .warn {
@@ -281,15 +297,10 @@ function fillPre(pre, lines) {
     if (/^[А-ЯЁ]{2}, \d/.test(line)) cls = "day";
     else if (/^---/.test(line)) cls = "cut";
     else if (/^#\s/.test(line)) cls = "th";
-    else if (/^(время по |данные:|USD, EUR:)/.test(line)) cls = "note";
+    else if (/^(время по |данные:)/.test(line)) cls = "note";
     if (cls === "day") { pre.append(...dateNodes(line)); return; }
     if (cls) { pre.append(el("span", cls, line)); return; }
-    const m = line.match(/^(.*)\(([+\-−]\d+(?:,\d+)?%)\)(.*)$/);
-    if (m) {
-      pre.append(m[1] + "(", el("span", m[2][0] === "+" ? "up" : "down", m[2]), ")" + m[3]);
-    } else {
-      pre.append(...dateNodes(line));
-    }
+    pre.append(...dateNodes(line));
   });
 }
 
@@ -390,9 +401,11 @@ function rangeChartEl(ch) {
   return wrap;
 }
 
+let TZ = "Europe/Moscow";
 function chartEl(ch) {
   if (ch.kind === "range") return rangeChartEl(ch);
-  const pts = (ch.points || []).map(p => ({ t: Date.parse(p.d + "T00:00:00Z"), v: p.v, d: p.d }));
+  // точки недельного графика с датой d, суточного — со временем t
+  const pts = (ch.points || []).map(p => ({ t: p.t ? Date.parse(p.t) : Date.parse(p.d + "T00:00:00Z"), v: p.v, d: p.d }));
   if (pts.length < 2) return null;
   const NS = "http://www.w3.org/2000/svg";
   const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
@@ -422,25 +435,55 @@ function chartEl(ch) {
   dot.style.left = X(last) + "%"; dot.style.top = Y(last) + "%";
   box.append(dot);
   const ends = el("div", "cends");
-  const lab = d => { const [y, m, dd] = d.split("-"); return +dd + " " + MON[+m - 1].slice(0, 3); };
-  ends.append(el("span", "", lab(first.d)), el("span", "cr", "мин " + fv(lo) + " · макс " + fv(hi)), el("span", "", lab(last.d)));
+  const lab = p => {
+    if (!p.d) return new Date(p.t).toLocaleTimeString("ru-RU", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
+    const [y, m, dd] = p.d.split("-"); return +dd + " " + MON[+m - 1].slice(0, 3);
+  };
+  ends.append(el("span", "", lab(first)), el("span", "cr", "мин " + fv(lo) + " · макс " + fv(hi)), el("span", "", lab(last)));
   wrap.append(top, box, ends);
   return wrap;
 }
 
-// Котировки кнопками: нажатие переключает график под ними
-let quoteSel = "USD";
+// Котировки кнопками: нажатие переключает график под ними; «неделя / сутки» — в заголовке карточки
+let quoteSel = "USD", quoteRange = "day";  // по умолчанию открыты «Сутки»
+// цвет дельты по модулю изменения в %: до первого порога зелёный, до второго жёлтый, дальше красный
+const DELTA_ZONES = { week: [3, 5], day: [0.5, 1] };
+const RANGES = [["week", "Неделя"], ["day", "Сутки"]];
 function quotesEl(c) {
   const wrap = el("div", "quotes");
   const codeOf = l => (l.match(/^[A-Z]{3}/) || [""])[0];
   const list = el("div", "qlist"), holder = el("div", "qchart");
+  const rng = el("div", "rng");
+  const set = code => {   // старый формат data.json: один недельный график без разбивки
+    const x = c.charts[code];
+    return x && x.points ? { week: x } : (x || {});
+  };
   if (!c.charts[quoteSel]) quoteSel = Object.keys(c.charts)[0];
   const show = () => {
     holder.replaceChildren();
-    const ch = c.charts[quoteSel] && chartEl(c.charts[quoteSel]);
+    const s = set(quoteSel);
+    if (!s[quoteRange]) quoteRange = s.week ? "week" : "day";
+    const ch = s[quoteRange] && chartEl(s[quoteRange]);
     if (ch) holder.append(ch);
     list.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.code === quoteSel));
+    list.querySelectorAll(".qdelta").forEach(x => {   // изменение курса в % за выбранный период: сутки или неделя
+      const ch = set(x.dataset.code)[quoteRange], p = ch && ch.points;
+      x.className = "qdelta";
+      if (!p || p.length < 2) { x.textContent = "—"; return; }
+      const d = (p[p.length - 1].v / p[0].v - 1) * 100, pc = Math.abs(d), [z1, z2] = DELTA_ZONES[quoteRange];
+      x.textContent = (d > 0 ? "+" : d < 0 ? "−" : "") + pc.toFixed(2).replace(".", ",") + "%";
+      x.classList.add(pc <= z1 ? "ok" : pc <= z2 ? "mid" : "bad");
+    });
+    rng.querySelectorAll("button").forEach(b => {
+      b.classList.toggle("on", b.dataset.r === quoteRange);
+      b.disabled = !s[b.dataset.r];
+    });
   };
+  for (const [r, label] of RANGES) {
+    const b = el("button", "", label); b.type = "button"; b.dataset.r = r;
+    b.onclick = () => { quoteRange = r; show(); };
+    rng.append(b);
+  }
   for (const line of c.lines) {
     const code = codeOf(line);
     const b = el("button", "qbtn");
@@ -449,9 +492,11 @@ function quotesEl(c) {
     if (!c.charts[code]) b.disabled = true;
     const sp = el("span", "mono"); fillPre(sp, [line]); b.append(sp);
     b.onclick = () => { quoteSel = code; show(); };
-    list.append(b);
+    const dx = el("span", "qdelta"); dx.dataset.code = code;
+    list.append(b, dx);
   }
   wrap.append(list, holder);
+  wrap.rng = rng;
   show();
   return wrap;
 }
@@ -531,7 +576,7 @@ function collectToday(cards) {
 }
 
 function render(data) {
-  const tz = data.timezone || "Europe/Moscow";
+  const tz = TZ = data.timezone || "Europe/Moscow";
   setToday(tz);
   root.innerHTML = "";
   {  // карточка «Сегодня» над задачами: пока без содержимого
@@ -585,7 +630,9 @@ function render(data) {
       if (!c.ok) body.append(warnEl(c));
     } else {
       if (c.charts && c.id === "quotes" && c.lines && c.lines.length) {
-        body.append(quotesEl(c));
+        const q = quotesEl(c);
+        body.append(q);
+        h2.append(q.rng);  // «Неделя / Сутки» — справа в заголовке
       } else {
         const pre = el("pre");
         fillPre(pre, c.lines && c.lines.length ? c.lines : ["Нет данных."]);
