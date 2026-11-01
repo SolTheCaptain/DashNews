@@ -161,6 +161,16 @@ pre .note, pre .th, pre .cut { color: var(--muted); }
 pre .cut { font-size: 11px; }
 
 .foot { flex: none; margin-top: 6px; color: var(--muted); font-size: clamp(11px, .6vw, 13px); }
+.card.login { grid-column: 1 / -1; grid-row: 4 / span 5; align-self: center; justify-self: center; width: min(440px, 100%); }
+.login form { display: flex; flex-direction: column; gap: 10px; }
+.login input[type=password] { font: 15px ui-monospace, Consolas, monospace; color: var(--text); background: #0f0a1a;
+  border: 1px solid #f2c14e66; border-radius: 8px; padding: 8px 10px; outline: none; }
+.login input[type=password]:focus { border-color: var(--gold); }
+.login .rem { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 6px; }
+.login .rem input { accent-color: var(--gold); }
+.login button { align-self: flex-start; padding: 6px 18px; }
+.login .lmsg { min-height: 1.2em; color: var(--down); font-size: 13px; }
+
 .warn {
   display: inline-block; margin-top: 6px; padding: 2px 9px; border-radius: 999px;
   color: var(--warn); background: #ffb45418; border: 1px solid #ffb45455; font-size: 11px;
@@ -695,12 +705,91 @@ function shapeCard(card) {
   draw();
 }
 
+// ---------- пароль: data.json зашифрован (см. collect.py), расшифровываем в браузере ----------
+const KDF_SALT = "DashNews", KEY_STORE = "dashnews-key";
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const hex = b => [...b].map(x => x.toString(16).padStart(2, "0")).join("");
+const unhex = h => new Uint8Array(h.match(/../g).map(x => parseInt(x, 16)));
+const store = {   // хранилище браузера может быть недоступно — тогда просто спрашиваем пароль каждый раз
+  get() { try { return localStorage.getItem(KEY_STORE) || sessionStorage.getItem(KEY_STORE); } catch (e) { return null; } },
+  set(v, remember) { try { (remember ? localStorage : sessionStorage).setItem(KEY_STORE, v); } catch (e) {} },
+  clear() { try { localStorage.removeItem(KEY_STORE); sessionStorage.removeItem(KEY_STORE); } catch (e) {} },
+};
+
+async function deriveKey(password, iter) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", hash: "SHA-256", salt: new TextEncoder().encode(KDF_SALT), iterations: iter }, base, 512);
+  return new Uint8Array(bits);
+}
+const hmacKey = raw => crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+async function decrypt(box, master) {
+  const nonce = b64(box.nonce), ct = b64(box.ct), tag = b64(box.tag);
+  const ek = await hmacKey(master.slice(0, 32)), mk = await hmacKey(master.slice(32));
+  const signed = new Uint8Array(nonce.length + ct.length); signed.set(nonce); signed.set(ct, nonce.length);
+  const want = new Uint8Array(await crypto.subtle.sign("HMAC", mk, signed));
+  if (want.length !== tag.length || want.some((x, i) => x !== tag[i])) throw new Error("bad password");
+  const blocks = [];
+  for (let i = 0; i < Math.ceil(ct.length / 32); i++) {
+    const m = new Uint8Array(20); m.set(nonce); new DataView(m.buffer).setUint32(16, i);
+    blocks.push(crypto.subtle.sign("HMAC", ek, m));
+  }
+  const ks = (await Promise.all(blocks)).map(x => new Uint8Array(x));
+  const pt = ct.map((x, i) => x ^ ks[i >> 5][i & 31]);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+
+function loginEl(box, wrong) {
+  root.innerHTML = "";
+  stamp.textContent = "";
+  const card = el("section", "card login");
+  const h = el("h2"); h.textContent = "Вход"; card.append(h);
+  const f = el("form");
+  const inp = el("input"); inp.type = "password"; inp.placeholder = "пароль"; inp.autocomplete = "current-password";
+  const lab = el("label", "rem"); const cb = el("input"); cb.type = "checkbox"; cb.checked = true;
+  lab.append(cb, " запомнить на этом устройстве");
+  const btn = el("button", "", "Открыть"); btn.type = "submit";
+  const msg = el("div", "lmsg", wrong ? "Неверный пароль." : "");
+  f.append(inp, lab, btn, msg);
+  f.onsubmit = async ev => {
+    ev.preventDefault();
+    btn.disabled = true; msg.textContent = "проверяю…";
+    try {
+      const master = await deriveKey(inp.value, box.iter);
+      const data = await decrypt(box, master);
+      store.set(hex(master), cb.checked);
+      render(data);
+    } catch (e) { msg.textContent = "Неверный пароль."; btn.disabled = false; inp.select(); }
+  };
+  card.append(f);
+  root.append(card);
+  inp.focus();
+}
+
+// В шапке после даты — красным названия блоков, где встречается сегодняшняя дата
+function showHits(cards) {
+  const out = [];
+  const walk = n => {
+    if (n.sections) { n.sections.forEach(walk); return; }
+    const hit = (n.lines || []).some(l => { DATE_RE.lastIndex = 0; let m; while ((m = DATE_RE.exec(l))) if (isToday(m)) return true; return false; })
+      || (n.items || []).some(it => { const m = (it.info || "").match(/до (\d{2})\.(\d{2})/); return m && +m[1] === TODAY.d && +m[2] === TODAY.m; });  // аукцион кончается сегодня
+    if (hit && !out.includes(n.title)) out.push(n.title);
+  };
+  cards.forEach(walk);
+  document.getElementById("hits").textContent = out.join(" · ");
+}
+
 async function load() {
   stamp.textContent = "загрузка…";
   try {
     const r = await fetch("data.json?t=" + Date.now(), { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
-    render(await r.json());
+    const data = await r.json();
+    if (!data.enc) { render(data); return; }
+    const saved = store.get();
+    if (!saved) { loginEl(data); return; }
+    try { render(await decrypt(data, unhex(saved))); }
+    catch (e) { store.clear(); loginEl(data, true); }   // пароль сменили — спрашиваем заново
   } catch (e) {
     root.textContent = "Не удалось загрузить data.json: " + e.message +
       " (страницу нужно открывать по ссылке GitHub Pages, а не файлом с диска)";

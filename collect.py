@@ -9,7 +9,10 @@
   2. добавить её в словарь HANDLERS внизу файла
   3. использовать "type": "мой_блок" в config.json
 """
+import base64
 import csv
+import hashlib
+import hmac
 import io
 import json
 import os
@@ -832,6 +835,44 @@ HANDLERS = {
 }
 
 
+# ---------- шифрование ----------
+
+# data.json шифруется паролем из секрета DASH_PASSWORD; страница расшифровывает его в браузере.
+# Ключ: PBKDF2-SHA256 (пароль, постоянная соль, KDF_ITER) → 64 байта: 32 на шифр, 32 на подпись.
+# Шифр: поток HMAC-SHA256(ключ, nonce + номер блока) XOR данные; подпись: HMAC-SHA256(nonce + шифротекст).
+KDF_SALT, KDF_ITER = b"DashNews", 200000
+
+
+def keys(password):
+    k = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), KDF_SALT, KDF_ITER, 64)
+    return k[:32], k[32:]
+
+
+def stream(key, nonce, n):
+    out = bytearray()
+    for i in range((n + 31) // 32):
+        out += hmac.new(key, nonce + i.to_bytes(4, "big"), hashlib.sha256).digest()
+    return bytes(out[:n])
+
+
+def encrypt(obj, password):
+    ek, mk = keys(password)
+    pt = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    nonce = os.urandom(16)
+    ct = bytes(a ^ b for a, b in zip(pt, stream(ek, nonce, len(pt))))
+    tag = hmac.new(mk, nonce + ct, hashlib.sha256).digest()
+    b64 = lambda b: base64.b64encode(b).decode()
+    return {"enc": 1, "iter": KDF_ITER, "nonce": b64(nonce), "ct": b64(ct), "tag": b64(tag)}
+
+
+def decrypt(box, password):
+    ek, mk = keys(password)
+    nonce, ct, tag = (base64.b64decode(box[k]) for k in ("nonce", "ct", "tag"))
+    if not hmac.compare_digest(hmac.new(mk, nonce + ct, hashlib.sha256).digest(), tag):
+        raise ValueError("неверный пароль")
+    return json.loads(bytes(a ^ b for a, b in zip(ct, stream(ek, nonce, len(ct)))))
+
+
 # ---------- запуск ----------
 
 def load_previous():
@@ -844,10 +885,12 @@ def load_previous():
         else:
             with open(os.path.join(ROOT, "data.json"), encoding="utf-8") as f:
                 data = json.load(f)
+        if data.get("enc"):
+            data = decrypt(data, os.environ.get("DASH_PASSWORD", ""))
         for c in data.get("cards", []):
             prev[c["id"]] = c
     except Exception:
-        pass
+        pass  # прошлых данных нет или пароль сменился: соберём с нуля
     return prev
 
 
@@ -912,8 +955,14 @@ def main():
         out = run_section(card, tz, prev.get(card["id"]))
         out["fetched"] = now_iso if out["ok"] else (prev.get(card["id"]) or {}).get("fetched")
         cards.append(out)
+    data = {"updated": now_iso, "timezone": tz.key, "cards": cards}
+    pw = os.environ.get("DASH_PASSWORD")
+    if pw:
+        data = encrypt(data, pw)
+    else:
+        print("::warning::нет секрета DASH_PASSWORD: data.json публикуется без шифрования")
     with open(os.path.join(ROOT, "data.json"), "w", encoding="utf-8") as f:
-        json.dump({"updated": now_iso, "timezone": tz.key, "cards": cards}, f, ensure_ascii=False, indent=1)
+        json.dump(data, f, ensure_ascii=False, indent=1)
     print(f"готово, карточек: {len(cards)}")
 
 
