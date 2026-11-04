@@ -384,7 +384,7 @@ function matchesEl(matches) {
     item.append(vs);
     if (m.when) { const w = el("div", "when"); w.append(...dateNodes(m.when)); item.append(w); }
     if (m.where) item.append(el("div", "where", m.where));
-    for (const r of m.round ? [m.round, m.round.prev] : []) {   // тур и результаты прошлого тура: список всплывает поверх страницы
+    for (const r of m.round ? [m.round, m.round.prev, m.round.table] : []) {   // тур и результаты прошлого тура: список всплывает поверх страницы
       if (!r || !r.lines || !r.lines.length) continue;
       const b = el("button", "rndbtn", r.title.toUpperCase());
       b.type = "button";
