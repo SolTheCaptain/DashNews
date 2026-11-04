@@ -108,8 +108,17 @@ FD_LEAGUES = {"english premier league": "PL", "spanish la liga": "PD", "italian 
 ESPN_LEAGUES = {"russian premier league": "rus.1", "russian football premier league": "rus.1"}
 
 
+_ESPN = {}
+
+
+def espn_json(slug):
+    if slug not in _ESPN:
+        _ESPN[slug] = http_json(f"https://site.api.espn.com/apis/v2/sports/soccer/{slug}/standings")
+    return _ESPN[slug]
+
+
 def espn_ranks(slug):
-    j = http_json(f"https://site.api.espn.com/apis/v2/sports/soccer/{slug}/standings")
+    j = espn_json(slug)
     out = {}
     for ch in j.get("children") or [j]:
         entries = (ch.get("standings") or {}).get("entries") or []
@@ -181,8 +190,30 @@ def rank_of(ranks, team_id, name):
     return None
 
 
-def round_block(rc, tz, skip_ids):
-    """Все матчи ближайшего тура чемпионата (можно исключить команды через skip_ids), места команд в скобках."""
+def league_table_rows(league):
+    """Таблица чемпионата строками (место, команда, И, В, Н, П, разница, очки): football-data.org или ESPN."""
+    code = FD_LEAGUES.get(league.lower())
+    if code and os.environ.get("FOOTBALL_DATA_KEY"):
+        sts = fd_get(f"/competitions/{code}/standings").get("standings") or []
+        st = next((x for x in sts if x.get("type") == "TOTAL"), sts[0] if sts else None)
+        return [(r["position"], r["team"].get("shortName") or r["team"]["name"], r["playedGames"], r["won"],
+                 r["draw"], r["lost"], r["goalDifference"], r["points"]) for r in (st or {}).get("table") or []]
+    slug = ESPN_LEAGUES.get(league.lower())
+    if slug:
+        j, rows = espn_json(slug), []
+        for ch in j.get("children") or [j]:
+            for i, e in enumerate((ch.get("standings") or {}).get("entries") or [], 1):
+                st = {x.get("name"): x.get("value") for x in e.get("stats") or []}
+                g = lambda k: int(st.get(k) or 0)
+                rows.append((g("rank") or i, e["team"].get("shortDisplayName") or e["team"].get("displayName"),
+                             g("gamesPlayed"), g("wins"), g("ties"), g("losses"), g("pointDifferential"), g("points")))
+        return sorted(rows)
+    return []
+
+
+def round_block(rc, tz, head_id):
+    """Тур чемпионата целиком (кроме ещё не сыгранного матча главной команды, он показан в карточке),
+    сыгранные матчи — со счётом; плюс предыдущий тур и таблица. Места команд в скобках."""
     lid = str(rc["league_id"])
     evs = http_json(f"{TSDB}/eventsnextleague.php?id={lid}").get("events") or []
     evs = [e for e in evs if e.get("intRound")]
@@ -191,11 +222,12 @@ def round_block(rc, tz, skip_ids):
     rnd = int(evs[0]["intRound"])
     season, league = evs[0].get("strSeason"), evs[0].get("strLeague") or rc.get("league", "")
     byid = {e["idEvent"]: e for e in evs if int(e["intRound"]) == rnd}
-    try:  # полный список тура (в «ближайших» может быть неполно)
+    try:  # весь тур, включая уже сыгранные матчи (в «ближайших» их нет)
         for e in http_json(f"{TSDB}/eventsround.php?id={lid}&r={rnd}&s={season}").get("events") or []:
             byid.setdefault(e["idEvent"], e)
     except Exception as e:
         print(f"::warning::тур {rnd}: {e}")
+    ranks = league_ranks({"idLeague": lid, "strSeason": season, "strLeague": league})
 
     def when(e):
         if e.get("strTimestamp"):
@@ -204,60 +236,57 @@ def round_block(rc, tz, skip_ids):
             return parse_utc(e["dateEvent"] + "T" + (e.get("strTime") or "00:00:00"))
         return None
 
-    ranks = league_ranks({"idLeague": lid, "strSeason": season, "strLeague": league})
-    items = []
-    for e in byid.values():
-        if str(e.get("idHomeTeam")) in skip_ids or str(e.get("idAwayTeam")) in skip_ids:
-            continue
-        w = when(e)
-        if w:
-            items.append((w, e))
-    items.sort(key=lambda x: x[0])
-    lines, cur = [], ""
-
     def nm(e, side):
         n = e.get(f"str{side}Team") or "?"
         r = rank_of(ranks, e.get(f"id{side}Team"), n)
         return f"{n} ({r})" if r else n
 
-    for w, e in items:
-        loc = w.astimezone(tz)
-        dl = day_label(loc)
-        if dl != cur:
-            cur = dl
-            lines += ([""] if lines else []) + [dl.upper()]
-        lines.append(f"  {loc:%H:%M}  {nm(e, 'Home')} — {nm(e, 'Away')}")
+    def played(e):
+        return e.get("intHomeScore") not in (None, "") and e.get("intAwayScore") not in (None, "")
+
+    def listing(events, skip_unplayed_head):
+        items = []
+        for e in events:
+            w = when(e)
+            if not w or (skip_unplayed_head and not played(e)
+                         and head_id in (str(e.get("idHomeTeam")), str(e.get("idAwayTeam")))):
+                continue
+            items.append((w, e))
+        items.sort(key=lambda x: x[0])
+        lines, cur = [], ""
+        for w, e in items:
+            loc = w.astimezone(tz)
+            dl = day_label(loc).upper()
+            if dl != cur:
+                cur = dl
+                lines += ([""] if lines else []) + [dl]
+            head = f"{e['intHomeScore']}:{e['intAwayScore']}" if played(e) else f"{loc:%H:%M}"
+            lines.append(f"  {head:<5}  {nm(e, 'Home')} — {nm(e, 'Away')}")
+        return lines
+
+    lines = listing(byid.values(), True)
     if not lines:
         return None
     out = {"title": f"Тур {rnd}", "lines": lines}
-    prev = round_results(lid, season, rnd - 1, ranks, tz, when, nm) if rnd > 1 else None
-    if prev:
-        out["prev"] = prev
+    if rnd > 1:
+        prev = {}
+        for url in (f"{TSDB}/eventspastleague.php?id={lid}", f"{TSDB}/eventsround.php?id={lid}&r={rnd - 1}&s={season}"):
+            try:
+                for e in http_json(url).get("events") or []:
+                    if str(e.get("intRound")) == str(rnd - 1) and played(e):
+                        prev.setdefault(e["idEvent"], e)
+            except Exception as ex:
+                print(f"::warning::тур {rnd - 1}: {ex}")
+        pl = listing(prev.values(), False)
+        if pl:
+            out["prev"] = {"title": f"Тур {rnd - 1}", "lines": pl}
+    try:
+        rows = league_table_rows(league)
+        if rows:
+            out["table"] = {"title": "Таблица", "lines": table_lines(rows, [])}
+    except Exception as ex:
+        print(f"::warning::таблица {league}: {ex}")
     return out
-
-
-def round_results(lid, season, rnd, ranks, tz, when, nm):
-    """Результаты уже сыгранного тура: счёт слева, у команд места в скобках."""
-    byid = {}
-    for url in (f"{TSDB}/eventspastleague.php?id={lid}", f"{TSDB}/eventsround.php?id={lid}&r={rnd}&s={season}"):
-        try:
-            for e in http_json(url).get("events") or []:
-                if str(e.get("intRound")) == str(rnd) and e.get("intHomeScore") not in (None, "") \
-                        and e.get("intAwayScore") not in (None, ""):
-                    byid.setdefault(e["idEvent"], e)
-        except Exception as ex:
-            print(f"::warning::результаты тура {rnd}: {ex}")
-    items = sorted(((when(e), e) for e in byid.values() if when(e)), key=lambda x: x[0])
-    lines, cur = [], ""
-    for w, e in items:
-        loc = w.astimezone(tz)
-        dl = day_label(loc)
-        if dl != cur:
-            cur = dl
-            lines += ([""] if lines else []) + [dl.upper()]
-        sc = f"{e['intHomeScore']}:{e['intAwayScore']}"
-        lines.append(f"  {sc:<4}  {nm(e, 'Home')} — {nm(e, 'Away')}")
-    return {"title": f"Результаты {rnd}", "lines": lines} if lines else None
 
 
 def team_match(card, tz):
@@ -312,7 +341,7 @@ def team_match(card, tz):
     }
     if card.get("round"):
         try:
-            rb = round_block(card["round"], tz, set())
+            rb = round_block(card["round"], tz, str(team["idTeam"]))
             if rb:
                 match["round"] = rb
         except Exception as e:
@@ -434,7 +463,7 @@ def fd_next(card, tz):
         h, a = m["homeTeam"], m["awayTeam"]
         names.append((f"{h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}", f"{ft['home']}:{ft['away']}"))
     width = max(len(t) for t, _ in names)
-    res = [day_label(parse_utc(past[0]["utcDate"]).astimezone(tz)).upper()]
+    res = ["РЕЗУЛЬТАТЫ", day_label(parse_utc(past[0]["utcDate"]).astimezone(tz)).upper()]
     res += [t.ljust(width) + " " + sc for t, sc in names]
     return {"lines": lines, "results": res}
 
