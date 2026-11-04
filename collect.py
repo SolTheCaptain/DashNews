@@ -398,8 +398,6 @@ def fd_next(card, tz):
         if first_only and ms:
             break  # нашли ближайшие матчи, дальше искать не нужно
     ms.sort(key=lambda m: m["utcDate"])
-    if not ms and not card.get("yesterday_results"):
-        return [f"В ближайшие {days} дней матчей нет."]
     if first_only and ms:
         first_date = parse_utc(ms[0]["utcDate"]).astimezone(tz).date()
         ms = [m for m in ms if parse_utc(m["utcDate"]).astimezone(tz).date() == first_date]
@@ -415,23 +413,30 @@ def fd_next(card, tz):
                     past.append(m)
         except Exception as e:
             print(f"::warning::результаты вчерашних матчей: {e}")
-    rows = []
-    for m in sorted(past, key=lambda m: m["utcDate"]) + ms:
-        loc = parse_utc(m["utcDate"]).astimezone(tz)
-        h, a = m["homeTeam"], m["awayTeam"]
-        ft = (m.get("score") or {}).get("fullTime") or {}
-        score = f"{ft['home']}:{ft['away']}" if m in past else None
-        rows.append((day_label(loc).upper(), f"  {loc:%H:%M}  {h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}", score))
-    if not rows:
+    if not ms and not past:
         return [f"В ближайшие {days} дней матчей нет."]
-    width = max([len(t) for _, t, sc in rows if sc] or [0])
     lines, cur = [], ""
-    for dl, text, score in rows:
+    for m in ms:
+        loc = parse_utc(m["utcDate"]).astimezone(tz)
+        dl = day_label(loc).upper()
         if dl != cur:
             cur = dl
             lines += ([""] if lines else []) + [dl]
-        lines.append(text.ljust(width) + "  " + score if score else text)
-    return lines
+        h, a = m["homeTeam"], m["awayTeam"]
+        lines.append(f"  {loc:%H:%M}  {h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}")
+    if not lines:
+        lines = ["Ближайших матчей в источнике нет."]
+    if not past:
+        return lines
+    names = []  # результаты вчерашних матчей отдельным столбцом справа: «Хозяева — Гости  счёт»
+    for m in sorted(past, key=lambda m: m["utcDate"]):
+        ft = m["score"]["fullTime"]
+        h, a = m["homeTeam"], m["awayTeam"]
+        names.append((f"{h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}", f"{ft['home']}:{ft['away']}"))
+    width = max(len(t) for t, _ in names)
+    res = [day_label(parse_utc(past[0]["utcDate"]).astimezone(tz)).upper()]
+    res += [t.ljust(width) + " " + sc for t, sc in names]
+    return {"lines": lines, "results": res}
 
 
 # ---------- источник: ESPN (теннис, неофициальный открытый API, ключ не нужен) ----------
@@ -962,7 +967,7 @@ def run_section(sec, tz, prev):
         res = fn(sec, tz)
         if isinstance(res, dict):
             out.update(ok=True, lines=res["lines"], matches=res.get("matches"), charts=res.get("charts"),
-                       links=res.get("links"))
+                       links=res.get("links"), results=res.get("results"))
         else:
             out.update(ok=True, lines=res)
         out["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -977,6 +982,8 @@ def run_section(sec, tz, prev):
             out["charts"] = prev["charts"]
         if (prev or {}).get("links"):
             out["links"] = prev["links"]
+        if (prev or {}).get("results"):
+            out["results"] = prev["results"]
     return out
 
 
