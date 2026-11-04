@@ -434,7 +434,7 @@ def fd_next(card, tz):
         h, a = m["homeTeam"], m["awayTeam"]
         names.append((f"{h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}", f"{ft['home']}:{ft['away']}"))
     width = max(len(t) for t, _ in names)
-    res = [day_label(parse_utc(past[0]["utcDate"]).astimezone(tz)).upper()]
+    res = ["РЕЗУЛЬТАТЫ", day_label(parse_utc(past[0]["utcDate"]).astimezone(tz)).upper()]
     res += [t.ljust(width) + " " + sc for t, sc in names]
     return {"lines": lines, "results": res}
 

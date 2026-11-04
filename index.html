@@ -213,7 +213,6 @@ pre .cut { font-size: 11px; }
   background: var(--panel2); box-shadow: 0 8px 28px #000c; max-width: calc(100vw - 16px); }
 .rndpop pre { white-space: pre; }
 .cols { display: flex; flex-wrap: wrap; gap: 0 18px; }
-.cols pre + pre { font-size: .86em; }
 .match .lbl { color: var(--gold-soft); font-weight: 700; text-transform: uppercase; }
 .sub[data-id="ucl-table"] pre { white-space: pre; }
 
@@ -314,10 +313,11 @@ function fillPre(pre, lines, links) {
       return;
     }
     let cls = "";
-    if (/^[А-ЯЁ]{2}, \d/.test(line)) cls = "day";
+    if (/^([А-ЯЁ]{2}, \d|РЕЗУЛЬТАТЫ$)/.test(line)) cls = "day";
     else if (/^---/.test(line)) cls = "cut";
     else if (/^#\s/.test(line)) cls = "th";
     else if (/^(время по |данные:)/.test(line)) cls = "note";
+    if (line === "РЕЗУЛЬТАТЫ") { pre.append(el("span", "day", line)); return; }
     if (cls === "day") { pre.append(...dateNodes(line)); return; }
     if (cls) { pre.append(el("span", cls, line)); return; }
     pre.append(...dateNodes(line));
