@@ -23,9 +23,9 @@
 | type | что делает | параметры |
 |---|---|---|
 | `team_next` | ближайший матч команды (TheSportsDB) | `team` (англ. название), `country` |
-| `teams_next` | ближайший матч каждой команды из `teams` (эмблемы, места в скобках); у команды можно задать `round: {league_id}` — под матчем раскрывается список всех матчей ближайшего тура чемпионата | `teams` (`name`, `label`, `emblem`, `country`, `id`, `round`) |
-| `fd_table` | таблица турнира (football-data.org) | `comp` (CL, PD, PL, BL1, SA, FL1…), `cutoffs` |
-| `fd_next` | матчи турнира на N дней вперёд (football-data.org) | `comp`, `days`, `first_day_only` |
+| `teams_next` | ближайший матч каждой команды из `teams` (эмблемы, места в скобках); у команды можно задать `round: {league_id}` — под матчем раскрываются списки: все матчи ближайшего тура чемпионата и результаты прошлого тура | `teams` (`name`, `label`, `emblem`, `country`, `id`, `round`) |
+| `fd_table` | таблица турнира (football-data.org) | `comp` (CL, PD, PL, BL1, SA, FL1…), `cutoffs`; в заголовке «После N тура» или «Идёт N тур», если тур в разгаре |
+| `fd_next` | матчи турнира на N дней вперёд (football-data.org) | `comp`, `days`, `first_day_only`, `yesterday_results` (матчи, начавшиеся вчера, со счётом справа) |
 | `slam_russians` | ближайший шлем: невылетевшие игроки из топ-N, родившиеся в нужной стране, и их матч (ESPN) | `slams`, `top`, `born_in` |
 | `steam_upcoming` | топ-N ожидаемых игр до конца года из «Популярных ожидаемых» Steam | `count`, `scan` |
 | `mtg_roadmap` | основные сеты Magic (core, expansion) до конца года, без даты — TBA (Scryfall) | `count` (сколько ближайших показать; без него — до конца года), `extra` (названия сетов без даты вручную), `types` (по умолчанию core, expansion) |

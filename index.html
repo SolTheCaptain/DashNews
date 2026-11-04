@@ -157,6 +157,8 @@ pre {
 }
 pre .day, .d { color: var(--gold-soft); font-weight: 700; text-transform: uppercase; }
 h3.has-ico { margin-bottom: 14px; }
+.glink { color: inherit; text-decoration: none; }
+.glink:hover { color: var(--gold); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: .2em; }
 pre .note, pre .th, pre .cut { color: var(--muted); }
 pre .cut { font-size: 11px; }
 
@@ -299,9 +301,15 @@ function dateNodes(text) {
   return out.filter(x => x !== "");
 }
 
-function fillPre(pre, lines) {
+function fillPre(pre, lines, links) {
   lines.forEach((line, i) => {
     if (i) pre.append("\n");
+    const gm = links && links[i] && line.match(/^(\d+\. )(.*?)( — .*)$/);   // название игры — ссылка на страницу в Steam
+    if (gm) {
+      const a = el("a", "glink", gm[2]); a.href = links[i]; a.target = "_blank"; a.rel = "noopener";
+      pre.append(gm[1], a, ...dateNodes(gm[3]));
+      return;
+    }
     let cls = "";
     if (/^[А-ЯЁ]{2}, \d/.test(line)) cls = "day";
     else if (/^---/.test(line)) cls = "cut";
@@ -353,10 +361,11 @@ function matchesEl(matches) {
     item.append(vs);
     if (m.when) { const w = el("div", "when"); w.append(...dateNodes(m.when)); item.append(w); }
     if (m.where) item.append(el("div", "where", m.where));
-    if (m.round && m.round.lines && m.round.lines.length) {
+    for (const r of m.round ? [m.round, m.round.prev] : []) {   // тур и результаты прошлого тура — выпадашки
+      if (!r || !r.lines || !r.lines.length) continue;
       const dt = el("details", "rnd");
-      dt.append(el("summary", "", m.round.title.toUpperCase()));
-      const pre = el("pre"); fillPre(pre, m.round.lines); dt.append(pre);
+      dt.append(el("summary", "", r.title.toUpperCase()));
+      const pre = el("pre"); fillPre(pre, r.lines); dt.append(pre);
       item.append(dt);
     }
     box.append(item);
@@ -645,7 +654,7 @@ function render(data) {
         h2.append(q.rng);  // «Неделя / Сутки» — справа в заголовке
       } else {
         const pre = el("pre");
-        fillPre(pre, c.lines && c.lines.length ? c.lines : ["Нет данных."]);
+        fillPre(pre, c.lines && c.lines.length ? c.lines : ["Нет данных."], c.links);
         body.append(pre);
         const w = c.charts && c.charts.weather && chartEl(c.charts.weather);
         if (w) body.append(w);

@@ -84,7 +84,8 @@
               "type": "fd_next",
               "comp": "CL",
               "days": 30,
-              "first_day_only": true
+              "first_day_only": true,
+              "yesterday_results": true
             },
             {
               "id": "ucl-table",

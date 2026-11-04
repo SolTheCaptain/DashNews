@@ -128,6 +128,7 @@ def norm_team(s):
     s = re.sub(r"[^a-z0-9 ]", " ", s)
     s = re.sub(r"\b(fc|cf|afc|sc|ac|as|ssc|rc|club|de|the|calcio|fk)\b", " ", s)
     s = re.sub(r"\b(moskva|moskow)\b", "moscow", s)
+    s = re.sub(r"\b(dinamo|dynamo)\b", "dynamo", s)
     return re.sub(r"\s+", " ", s).strip()
 
 
@@ -177,11 +178,6 @@ def rank_of(ranks, team_id, name):
     for k2, pos in ranks["names"].items():
         if k2 and (k2 in n or n in k2) and min(len(k2), len(n)) >= 5:
             return pos
-    w = n.split()[0]  # одно и то же первое слово («lokomotiv») только у одной команды таблицы
-    if len(w) >= 6:
-        hits = {pos for k2, pos in ranks["names"].items() if k2.split() and k2.split()[0] == w}
-        if len(hits) == 1:
-            return hits.pop()
     return None
 
 
@@ -231,7 +227,37 @@ def round_block(rc, tz, skip_ids):
             cur = dl
             lines += ([""] if lines else []) + [dl.upper()]
         lines.append(f"  {loc:%H:%M}  {nm(e, 'Home')} — {nm(e, 'Away')}")
-    return {"title": f"Тур {rnd}", "lines": lines} if lines else None
+    if not lines:
+        return None
+    out = {"title": f"Тур {rnd}", "lines": lines}
+    prev = round_results(lid, season, rnd - 1, ranks, tz, when, nm) if rnd > 1 else None
+    if prev:
+        out["prev"] = prev
+    return out
+
+
+def round_results(lid, season, rnd, ranks, tz, when, nm):
+    """Результаты уже сыгранного тура: счёт слева, у команд места в скобках."""
+    byid = {}
+    for url in (f"{TSDB}/eventspastleague.php?id={lid}", f"{TSDB}/eventsround.php?id={lid}&r={rnd}&s={season}"):
+        try:
+            for e in http_json(url).get("events") or []:
+                if str(e.get("intRound")) == str(rnd) and e.get("intHomeScore") not in (None, "") \
+                        and e.get("intAwayScore") not in (None, ""):
+                    byid.setdefault(e["idEvent"], e)
+        except Exception as ex:
+            print(f"::warning::результаты тура {rnd}: {ex}")
+    items = sorted(((when(e), e) for e in byid.values() if when(e)), key=lambda x: x[0])
+    lines, cur = [], ""
+    for w, e in items:
+        loc = w.astimezone(tz)
+        dl = day_label(loc)
+        if dl != cur:
+            cur = dl
+            lines += ([""] if lines else []) + [dl.upper()]
+        sc = f"{e['intHomeScore']}:{e['intAwayScore']}"
+        lines.append(f"  {sc:<4}  {nm(e, 'Home')} — {nm(e, 'Away')}")
+    return {"title": f"Результаты {rnd}", "lines": lines} if lines else None
 
 
 def team_match(card, tz):
@@ -346,7 +372,10 @@ def fd_table(card, tz):
              r["won"], r["draw"], r["lost"], r["goalDifference"], r["points"]) for r in rows]
     lines = []
     played = min(r[2] for r in data)  # сколько туров сыграно всеми командами, а не номер текущего тура
-    if played:
+    top = max(r[2] for r in data)
+    if top > played:
+        lines.append(f"Идёт {top} тур")  # тур в разгаре: часть команд уже сыграла, часть ещё нет
+    elif played:
         lines.append(f"После {played} тура")
     return lines + table_lines(data, [tuple(c) for c in card.get("cutoffs", [])])
 
@@ -369,21 +398,39 @@ def fd_next(card, tz):
         if first_only and ms:
             break  # нашли ближайшие матчи, дальше искать не нужно
     ms.sort(key=lambda m: m["utcDate"])
-    if not ms:
+    if not ms and not card.get("yesterday_results"):
         return [f"В ближайшие {days} дней матчей нет."]
-    if first_only:
+    if first_only and ms:
         first_date = parse_utc(ms[0]["utcDate"]).astimezone(tz).date()
         ms = [m for m in ms if parse_utc(m["utcDate"]).astimezone(tz).date() == first_date]
-    lines = []
-    cur = ""
-    for m in ms:
+    past = []  # матчи, начавшиеся вчера: показываем с итоговым счётом в правом столбце
+    if card.get("yesterday_results"):
+        try:
+            yday = (datetime.now(tz) - timedelta(days=1)).date()
+            frm, to = (now - timedelta(days=2)).strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
+            for m in fd_get(f"/competitions/{card['comp']}/matches?dateFrom={frm}&dateTo={to}").get("matches") or []:
+                ft = (m.get("score") or {}).get("fullTime") or {}
+                if m.get("status") == "FINISHED" and ft.get("home") is not None \
+                        and parse_utc(m["utcDate"]).astimezone(tz).date() == yday:
+                    past.append(m)
+        except Exception as e:
+            print(f"::warning::результаты вчерашних матчей: {e}")
+    rows = []
+    for m in sorted(past, key=lambda m: m["utcDate"]) + ms:
         loc = parse_utc(m["utcDate"]).astimezone(tz)
-        dl = day_label(loc)
+        h, a = m["homeTeam"], m["awayTeam"]
+        ft = (m.get("score") or {}).get("fullTime") or {}
+        score = f"{ft['home']}:{ft['away']}" if m in past else None
+        rows.append((day_label(loc).upper(), f"  {loc:%H:%M}  {h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}", score))
+    if not rows:
+        return [f"В ближайшие {days} дней матчей нет."]
+    width = max([len(t) for _, t, sc in rows if sc] or [0])
+    lines, cur = [], ""
+    for dl, text, score in rows:
         if dl != cur:
             cur = dl
-            lines += ([""] if lines else []) + [dl.upper()]
-        h, a = m["homeTeam"], m["awayTeam"]
-        lines.append(f"  {loc:%H:%M}  {h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}")
+            lines += ([""] if lines else []) + [dl]
+        lines.append(text.ljust(width) + "  " + score if score else text)
     return lines
 
 
@@ -488,7 +535,7 @@ def steam_upcoming(card, tz):
     n = int(card.get("count", 5))
     today = datetime.now(tz).date()
     end = date(today.year, 12, 31)
-    games, seen = [], set()
+    games, seen = [], set()  # игра: (название, дата, номер в Steam)
     for start in range(0, int(card.get("scan", 150)), 50):
         j = http_json("https://store.steampowered.com/search/results/?query&count=50"
                       f"&start={start}&filter=popularcomingsoon&category1=998&cc=us&l=english&infinite=1")
@@ -509,15 +556,17 @@ def steam_upcoming(card, tz):
                 except ValueError:
                     pass
             if d and today <= d <= end:
-                games.append((unescape(t.group(1).strip()), d))
+                games.append((unescape(t.group(1).strip()), d, appid.split(",")[0]))
         if len(games) >= n:
             break
     if not games:
         return ["В списке «Популярные ожидаемые» нет игр с точной датой до конца года."]
     lines = [f"Топ-{n} ожидаемых новинок до {end.day} {MONTHS[end.month - 1]}"]
-    for i, (name, d) in enumerate(games[:n], 1):
+    links = {}
+    for i, (name, d, appid) in enumerate(games[:n], 1):
+        links[str(len(lines))] = f"https://store.steampowered.com/app/{appid}/"  # номер строки → страница игры
         lines.append(f"{i}. {name} — {d.day} {MONTHS[d.month - 1]}")
-    return lines
+    return {"lines": lines, "links": links}
 
 
 # ---------- источник: Scryfall (сеты Magic, ключ не нужен) ----------
@@ -912,7 +961,8 @@ def run_section(sec, tz, prev):
             raise RuntimeError(f"неизвестный тип блока: {sec.get('type')}")
         res = fn(sec, tz)
         if isinstance(res, dict):
-            out.update(ok=True, lines=res["lines"], matches=res.get("matches"), charts=res.get("charts"))
+            out.update(ok=True, lines=res["lines"], matches=res.get("matches"), charts=res.get("charts"),
+                       links=res.get("links"))
         else:
             out.update(ok=True, lines=res)
         out["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -925,6 +975,8 @@ def run_section(sec, tz, prev):
             out["matches"] = prev["matches"]
         if (prev or {}).get("charts"):
             out["charts"] = prev["charts"]
+        if (prev or {}).get("links"):
+            out["links"] = prev["links"]
     return out
 
 
