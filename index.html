@@ -205,10 +205,9 @@ pre .cut { font-size: 11px; }
 .match .vs .n { color: var(--text); font-weight: 700; text-transform: uppercase; }
 .match .when { color: var(--text); }
 .match .where { color: var(--muted); }
-.rndbtn { all: unset; display: block; box-sizing: border-box; margin-top: 6px; cursor: pointer; color: var(--gold-soft); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-.rndbtn::before { content: "▸ "; }
-.rndbtn.on::before { content: "▾ "; }
-.rndbtn:hover { color: var(--gold); }
+.rndrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.rndbtn { text-transform: uppercase; letter-spacing: .06em; padding: 4px 12px; }
+.rndbtn.on { background: #f2c14e2e; border-color: #f2c14e; }
 .rndpop { position: fixed; z-index: 50; overflow: auto; padding: 8px 12px; border: 1px solid #f2c14e66; border-radius: 10px;
   background: var(--panel2); box-shadow: 0 8px 28px #000c; max-width: calc(100vw - 16px); }
 .rndpop pre { white-space: pre; }
@@ -384,13 +383,15 @@ function matchesEl(matches) {
     item.append(vs);
     if (m.when) { const w = el("div", "when"); w.append(...dateNodes(m.when)); item.append(w); }
     if (m.where) item.append(el("div", "where", m.where));
-    for (const r of m.round ? [m.round, m.round.prev, m.round.table] : []) {   // тур и результаты прошлого тура: список всплывает поверх страницы
+    const rr = el("div", "rndrow");   // кнопки: тур, прошлый тур, таблица; список всплывает поверх страницы
+    for (const r of m.round ? [m.round, m.round.prev, m.round.table] : []) {
       if (!r || !r.lines || !r.lines.length) continue;
       const b = el("button", "rndbtn", r.title.toUpperCase());
       b.type = "button";
       b.onclick = e => { e.stopPropagation(); togglePop(b, r.lines); };
-      item.append(b);
+      rr.append(b);
     }
+    if (rr.children.length) item.append(rr);
     box.append(item);
   }
   return box;
