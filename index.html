@@ -180,7 +180,7 @@ pre .cut { font-size: 11px; }
 
 .subs {
   flex: 1; min-height: 0; display: grid; gap: 10px;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.45fr);
   grid-template-rows: minmax(0, auto) minmax(0, 1fr);
 }
 .sub {
@@ -205,12 +205,15 @@ pre .cut { font-size: 11px; }
 .match .vs .n { color: var(--text); font-weight: 700; text-transform: uppercase; }
 .match .when { color: var(--text); }
 .match .where { color: var(--muted); }
-.match details.rnd { margin-top: 6px; }
-.match details.rnd summary { cursor: pointer; color: var(--gold-soft); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; list-style: none; }
-.match details.rnd summary::-webkit-details-marker { display: none; }
-.match details.rnd summary::before { content: "▸ "; }
-.match details.rnd[open] summary::before { content: "▾ "; }
-.match details.rnd pre { margin-top: 4px; white-space: pre; }
+.rndbtn { all: unset; display: block; box-sizing: border-box; margin-top: 6px; cursor: pointer; color: var(--gold-soft); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.rndbtn::before { content: "▸ "; }
+.rndbtn.on::before { content: "▾ "; }
+.rndbtn:hover { color: var(--gold); }
+.rndpop { position: fixed; z-index: 50; overflow: auto; padding: 8px 12px; border: 1px solid #f2c14e66; border-radius: 10px;
+  background: var(--panel2); box-shadow: 0 8px 28px #000c; max-width: calc(100vw - 16px); }
+.rndpop pre { white-space: pre; }
+.cols { display: flex; flex-wrap: wrap; gap: 0 18px; }
+.cols pre + pre { font-size: .86em; }
 .match .lbl { color: var(--gold-soft); font-weight: 700; text-transform: uppercase; }
 .sub[data-id="ucl-table"] pre { white-space: pre; }
 
@@ -339,6 +342,26 @@ function badgeEl(url, fallbackText) {
   return wrap;
 }
 
+// Всплывающий список (тур, результаты): не растягивает карточку и не двигает вырез в рамке футбола
+let pop = null;
+function closePop() { if (pop) { pop.btn.classList.remove("on"); pop.remove(); pop = null; } }
+function togglePop(btn, lines) {
+  const same = pop && pop.btn === btn;
+  closePop();
+  if (same) return;
+  const p = el("div", "rndpop"), pre = el("pre");
+  fillPre(pre, lines); p.append(pre); p.btn = btn;
+  const r = btn.getBoundingClientRect(), below = innerHeight - r.bottom - 12, above = r.top - 12;
+  document.body.append(p);
+  btn.classList.add("on");
+  pop = p;
+  p.style.left = Math.max(8, Math.min(r.left, innerWidth - p.offsetWidth - 8)) + "px";
+  if (p.offsetHeight > below && above > below) { p.style.maxHeight = above + "px"; p.style.bottom = (innerHeight - r.top + 4) + "px"; }
+  else { p.style.maxHeight = below + "px"; p.style.top = (r.bottom + 4) + "px"; }
+}
+document.addEventListener("click", e => { if (pop && !pop.contains(e.target)) closePop(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closePop(); });
+
 function matchesEl(matches) {
   const box = el("div", "matches");
   for (const m of matches) {
@@ -361,12 +384,12 @@ function matchesEl(matches) {
     item.append(vs);
     if (m.when) { const w = el("div", "when"); w.append(...dateNodes(m.when)); item.append(w); }
     if (m.where) item.append(el("div", "where", m.where));
-    for (const r of m.round ? [m.round, m.round.prev] : []) {   // тур и результаты прошлого тура — выпадашки
+    for (const r of m.round ? [m.round, m.round.prev] : []) {   // тур и результаты прошлого тура: список всплывает поверх страницы
       if (!r || !r.lines || !r.lines.length) continue;
-      const dt = el("details", "rnd");
-      dt.append(el("summary", "", r.title.toUpperCase()));
-      const pre = el("pre"); fillPre(pre, r.lines); dt.append(pre);
-      item.append(dt);
+      const b = el("button", "rndbtn", r.title.toUpperCase());
+      b.type = "button";
+      b.onclick = e => { e.stopPropagation(); togglePop(b, r.lines); };
+      item.append(b);
     }
     box.append(item);
   }
@@ -541,7 +564,12 @@ function subEl(s) {
   } else {
     const pre = el("pre");
     fillPre(pre, s.lines && s.lines.length ? s.lines : ["Нет данных."]);
-    sb.append(pre);
+    if (s.results && s.results.length) {   // слева календарь, справа результаты вчерашних матчей
+      const cols = el("div", "cols"), rp = el("pre");
+      fillPre(rp, s.results);
+      cols.append(pre, rp);
+      sb.append(cols);
+    } else sb.append(pre);
   }
   if (!s.ok) sb.append(warnEl(s));
   sub.append(sb);
@@ -597,6 +625,7 @@ function collectToday(cards) {
 function render(data) {
   const tz = TZ = data.timezone || "Europe/Moscow";
   setToday(tz);
+  closePop();
   root.innerHTML = "";
   {  // карточка «Сегодня» над задачами: пока без содержимого
     const t = el("section", "card");
