@@ -312,11 +312,11 @@ function fillPre(pre, lines, links) {
       return;
     }
     let cls = "";
-    if (/^([А-ЯЁ]{2}, \d|РЕЗУЛЬТАТЫ$)/.test(line)) cls = "day";
+    if (/^[А-ЯЁ]{2}, \d/.test(line)) cls = "day";
     else if (/^---/.test(line)) cls = "cut";
     else if (/^#\s/.test(line)) cls = "th";
     else if (/^(время по |данные:)/.test(line)) cls = "note";
-    if (line === "РЕЗУЛЬТАТЫ") { pre.append(el("span", "day", line)); return; }
+    if (line.startsWith("РЕЗУЛЬТАТЫ")) { pre.append(el("span", "day", line)); return; }
     if (cls === "day") { pre.append(...dateNodes(line)); return; }
     if (cls) { pre.append(el("span", cls, line)); return; }
     pre.append(...dateNodes(line));
@@ -641,7 +641,7 @@ function render(data) {
     tt.append(dt);
     h.append(tt, im);
     const tb = el("div", "todaybody");
-    const groups = collectToday(data.cards);
+    const groups = collectToday(data.cards.filter(c => !c.hidden));
     if (!groups.length) tb.append(el("div", "tnone", "На сегодня ничего нет."));
     for (const g of groups) {
       tb.append(el("div", "tgroup", g.label));
@@ -653,6 +653,7 @@ function render(data) {
     root.append(t);
   }
   for (const c of data.cards) {
+    if (c.hidden) continue;   // карточка скрыта источником (например, хоккей вне плей-офф)
     const card = el("section", "card");
     card.dataset.id = c.id;
     const h2 = el("h2");

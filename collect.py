@@ -289,6 +289,20 @@ def round_block(rc, tz, head_id):
     return out
 
 
+PLAYOFF_RE = re.compile(r"play-?off|плей-?офф|quarter|semi|final|1/8|1/4|1/2|finals", re.I)
+
+
+def is_playoff(ev):
+    """Матч плей-офф: у TheSportsDB они идут с «круглыми» номерами раунда (125, 150, 200…) или с пометкой в названии."""
+    try:
+        if int(ev.get("intRound") or 0) >= 100:
+            return True
+    except ValueError:
+        pass
+    text = " ".join(str(ev.get(k) or "") for k in ("strLeague", "strEvent", "strRound", "strStage", "strDescriptionEN"))
+    return bool(PLAYOFF_RE.search(text))
+
+
 def team_match(card, tz):
     """Ближайший матч команды: (строки текстом, словарь для карточки с эмблемами)."""
     name, country = card["team"], card.get("country")
@@ -338,7 +352,9 @@ def team_match(card, tz):
                 "badge": ev.get(f"str{opp_side}TeamBadge") or (team_badge(opp_id) if opp_id else None),
                 "rank": rank_of(ranks, opp_id, ev.get(f"str{opp_side}Team"))},
         "home": own_home, "when": when_txt, "where": where or None,
+        "playoff": is_playoff(ev),
     }
+    print(f"матч {name}: {ev.get('strEvent')} | раунд {ev.get('intRound')} | {ev.get('strLeague')} | плей-офф: {match['playoff']}")
     if card.get("round"):
         try:
             rb = round_block(card["round"], tz, str(team["idTeam"]))
@@ -378,6 +394,8 @@ def teams_next(card, tz):
             matches.append({"label": label, "error": f"не удалось получить данные ({e})"})
     if fails == len(card["teams"]):
         raise RuntimeError("не удалось получить данные ни по одной команде")
+    if card.get("only_playoffs") and not any(m.get("playoff") for m in matches):
+        return {"lines": [], "matches": [], "hidden": True}  # вне плей-офф карточка скрыта
     return {"lines": lines, "matches": matches}
 
 
@@ -463,7 +481,7 @@ def fd_next(card, tz):
         h, a = m["homeTeam"], m["awayTeam"]
         names.append((f"{h.get('shortName') or h['name']} — {a.get('shortName') or a['name']}", f"{ft['home']}:{ft['away']}"))
     width = max(len(t) for t, _ in names)
-    res = ["РЕЗУЛЬТАТЫ", day_label(parse_utc(past[0]["utcDate"]).astimezone(tz)).upper()]
+    res = ["РЕЗУЛЬТАТЫ · " + day_label(parse_utc(past[0]["utcDate"]).astimezone(tz)).upper()]  # одна строка: строки матчей встают вровень с календарём
     res += [t.ljust(width) + " " + sc for t, sc in names]
     return {"lines": lines, "results": res}
 
@@ -996,7 +1014,8 @@ def run_section(sec, tz, prev):
         res = fn(sec, tz)
         if isinstance(res, dict):
             out.update(ok=True, lines=res["lines"], matches=res.get("matches"), charts=res.get("charts"),
-                       links=res.get("links"), results=res.get("results"))
+                       links=res.get("links"), results=res.get("results"),
+                       hidden=res.get("hidden"))
         else:
             out.update(ok=True, lines=res)
         out["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")

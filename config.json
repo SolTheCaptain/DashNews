@@ -127,6 +127,7 @@
       "id": "hockey",
       "title": "Хоккей",
       "type": "teams_next",
+      "only_playoffs": true,
       "teams": [
         {
           "label": "Spartak Moscow",
