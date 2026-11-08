@@ -866,10 +866,13 @@ def sheet_tasks(card, tz):
         raise RuntimeError("таблица недоступна: проверь доступ «все, у кого есть ссылка»")
     today = datetime.now(tz).date()
     days = int(card.get("days", 10))
-    dated, undated = [], []
+    dated, undated, discuss = [], [], []
     for row in csv.DictReader(io.StringIO(text)):
         row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
         desc, contact = row.get("описание", ""), row.get("контакт", "")
+        m = re.match(r"^[ОO]\s*[-–—]\s*(.+)$", desc)  # «О - …» → кнопка «Обсудить»
+        if m:
+            discuss.append(m.group(1))
         raw_d, raw_t = row.get("дата", ""), row.get("время", "").replace(".", ":")
         if not (desc or raw_d):
             continue
@@ -898,7 +901,7 @@ def sheet_tasks(card, tz):
             dated.append((d, t or datetime.min.time(), f"{day_label(d)}{f', {t:%H:%M}' if t else ''} — {text_}"))
     dated.sort(key=lambda x: (x[0], x[1]))
     lines = [x[2] for x in dated] + [f"без даты — {u}" for u in undated]
-    return lines or [f"В ближайшие {days} дн. задач нет."]
+    return {"lines": lines or [f"В ближайшие {days} дн. задач нет."], "discuss": discuss}
 
 
 # ---------- реестр типов блоков ----------
@@ -996,7 +999,7 @@ def run_section(sec, tz, prev):
         res = fn(sec, tz)
         if isinstance(res, dict):
             out.update(ok=True, lines=res["lines"], matches=res.get("matches"), charts=res.get("charts"),
-                       links=res.get("links"), results=res.get("results"))
+                       links=res.get("links"), results=res.get("results"), discuss=res.get("discuss"))
         else:
             out.update(ok=True, lines=res)
         out["at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -1013,6 +1016,8 @@ def run_section(sec, tz, prev):
             out["links"] = prev["links"]
         if (prev or {}).get("results"):
             out["results"] = prev["results"]
+        if (prev or {}).get("discuss"):
+            out["discuss"] = prev["discuss"]
     return out
 
 

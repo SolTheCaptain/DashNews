@@ -88,6 +88,12 @@ h2.has-ico { display: flex; align-items: center; }
 .icolink { display: inline-flex; line-height: 0; transition: transform .15s; }
 .icolink:hover { transform: scale(1.12); }
 h2.has-ico .t { text-box: trim-both cap alphabetic; }
+.discbtn { margin-left: 14px; padding: 4px 22px; font-size: 12px; letter-spacing: .04em; text-transform: none; }
+.pop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: #0f0a1acc; }
+.pop .box { min-width: 280px; max-width: min(520px, 90vw); max-height: 80vh; overflow: auto; padding: 16px 20px; border-radius: 14px; background: var(--panel2); border: 1px solid var(--gold-soft); box-shadow: 0 10px 40px #000a; }
+.pop h3 { margin-bottom: 10px; }
+.pop ol { margin: 0; padding-left: 1.4em; }
+.pop li { margin: 4px 0; }
 .card[data-id="today"] h2 { color: var(--today); }
 h2 .big { font-size: 1.15em; }
 h2 .dt { font-size: 1.2em; font-family: "Times New Roman", Times, "Liberation Serif", serif; font-variant-numeric: lining-nums; }
@@ -623,6 +629,23 @@ function collectToday(cards) {
   return groups;
 }
 
+function discussBtn(items) {
+  const b = el("button", "discbtn", "Обсудить" + (items.length ? ` · ${items.length}` : ""));
+  b.onclick = () => {
+    const pop = el("div", "pop"), box = el("div", "box");
+    box.append(el("h3", "", "Обсудить"));
+    if (items.length) { const ol = el("ol"); for (const x of items) ol.append(el("li", "", x)); box.append(ol); }
+    else box.append(el("div", "tnone", "Пусто."));
+    pop.append(box);
+    const close = () => { pop.remove(); document.removeEventListener("keydown", esc); };
+    const esc = e => { if (e.key === "Escape") close(); };
+    pop.onclick = e => { if (e.target === pop) close(); };
+    document.addEventListener("keydown", esc);
+    document.body.append(pop);
+  };
+  return b;
+}
+
 function render(data) {
   const tz = TZ = data.timezone || "Europe/Moscow";
   setToday(tz);
@@ -667,6 +690,7 @@ function render(data) {
         a.append(img);
         h2.append(el("span", "t", c.title), a);
       } else h2.append(el("span", "t", c.title), img);
+      if (c.id === "tasks") h2.append(discussBtn(c.discuss || []));
     } else {
       h2.textContent = c.title;
     }
