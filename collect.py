@@ -871,8 +871,11 @@ def sheet_tasks(card, tz):
         row = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
         desc, contact = row.get("описание", ""), row.get("контакт", "")
         m = re.match(r"^[ОO]\s*[-–—]\s*(.+)$", desc)  # «О - …» → кнопка «Обсудить»
-        if m:
-            discuss.append(m.group(1))
+        if m:  # дата (день.месяц) в начале строки, без даты — пробелы той же ширины
+            dm = re.match(r"^(\d{1,2})\.(\d{1,2})", row.get("дата", ""))
+            when = f"{int(dm.group(1)):02d}.{int(dm.group(2)):02d}" if dm else " " * 5
+            discuss.append(f"{when} {m.group(1)}")
+            continue  # обсуждения в основной список задач не идут
         raw_d, raw_t = row.get("дата", ""), row.get("время", "").replace(".", ":")
         if not (desc or raw_d):
             continue
