@@ -618,7 +618,8 @@ function collectToday(cards) {
     for (const m of node.matches || []) {
       const w = (m.when || "").match(new RegExp(DATE_SRC, "i"));
       if (w && isTodayMatch(w)) {
-        const t = (m.when.match(/\d{1,2}:\d{2}/) || [""])[0];
+        const t = m.score ? (m.home === false ? m.score.split(":").reverse().join(":") : m.score)  // счёт: хозяева первыми, как в строке
+                          : (m.when.match(/\d{1,2}:\d{2}/) || [""])[0];
         const a = m.own.name, b = m.opp.name;
         ls.push(`${m.home === false ? b + " — " + a : a + " — " + b}${t ? ", " + t : ""}`);
       }

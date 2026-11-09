@@ -315,17 +315,26 @@ def team_match(card, tz):
     events = sorted(events, key=lambda e: when(e) or datetime.max.replace(tzinfo=timezone.utc))
     ev = events[0]
     w = when(ev)
+    own_home = str(ev.get("idHomeTeam")) == str(team["idTeam"])
+    score = None  # матч уже сыгран (источник отдаёт его в «ближайших» с опозданием) → счёт вместо времени
+    if w and datetime.now(timezone.utc) > w + timedelta(minutes=105) and ev.get("idEvent"):
+        try:
+            full = (http_json(f"{TSDB}/lookupevent.php?id={ev['idEvent']}").get("events") or [ev])[0]
+            hs, as_ = full.get("intHomeScore"), full.get("intAwayScore")
+            if hs not in (None, "") and as_ not in (None, ""):
+                score = f"{hs}:{as_}" if own_home else f"{as_}:{hs}"  # свой счёт первым, как на карточке
+        except Exception as e:
+            print(f"::warning::счёт матча {name}: {e}")
     lines = [ev.get("strEvent") or name]
     when_txt = None
     if w:
         loc = w.astimezone(tz)
-        when_txt = f"{day_label(loc)}, {loc:%H:%M}"
+        when_txt = f"{day_label(loc)}, {score or f'{loc:%H:%M}'}"
         lines.append(when_txt)
     where = ", ".join(x for x in (ev.get("strLeague"), ev.get("strVenue")) if x)
     if where:
         lines.append(where)
 
-    own_home = str(ev.get("idHomeTeam")) == str(team["idTeam"])
     own_side, opp_side = ("Home", "Away") if own_home else ("Away", "Home")
     opp_id = ev.get(f"id{opp_side}Team")
     ranks = league_ranks(ev)
@@ -337,7 +346,7 @@ def team_match(card, tz):
         "opp": {"name": ev.get(f"str{opp_side}Team") or "?",
                 "badge": ev.get(f"str{opp_side}TeamBadge") or (team_badge(opp_id) if opp_id else None),
                 "rank": rank_of(ranks, opp_id, ev.get(f"str{opp_side}Team"))},
-        "home": own_home, "when": when_txt, "where": where or None,
+        "home": own_home, "when": when_txt, "where": where or None, "score": score,
     }
     if card.get("round"):
         try:
